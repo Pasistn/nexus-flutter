@@ -1,0 +1,703 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:provider/provider.dart';
+import '../../core/theme/app_theme.dart';
+import '../../core/utils/geo_utils.dart';
+import '../../models/profile.dart';
+import '../../models/skill.dart';
+import '../../providers/auth_provider.dart';
+import '../../providers/profile_provider.dart';
+import '../../providers/ratings_provider.dart';
+import '../../providers/skills_provider.dart';
+import '../../screens/auth/auth_screen.dart';
+import '../../screens/profile/profile_screen.dart';
+import '../../screens/skills/add_skill_screen.dart';
+import '../../widgets/skill_card.dart';
+import '../../widgets/star_rating_bar.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final MapController _mapController = MapController();
+  LatLng _center = const LatLng(48.1351, 11.5820); // Munich default
+  int _currentIndex = 0;
+  Skill? _selectedSkill;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _init());
+  }
+
+  Future<void> _init() async {
+    final skills = context.read<SkillsProvider>();
+    await skills.loadSkills();
+
+    final profile = context.read<ProfileProvider>();
+    final auth = context.read<AuthProvider>();
+    if (auth.isAuthenticated) {
+      await profile.loadProfile(auth.currentUser!.id);
+      if (profile.profile?.homeLat != null) {
+        _moveTo(LatLng(profile.profile!.homeLat!, profile.profile!.homeLng!));
+        return;
+      }
+    }
+    await _tryGetCurrentLocation();
+  }
+
+  Future<void> _tryGetCurrentLocation() async {
+    try {
+      final perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        await Geolocator.requestPermission();
+      }
+      final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.medium);
+      _moveTo(LatLng(pos.latitude, pos.longitude));
+    } catch (_) {}
+  }
+
+  void _moveTo(LatLng latlng) {
+    setState(() => _center = latlng);
+    _mapController.move(latlng, 12);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+    final profile = context.watch<ProfileProvider>().profile;
+    final skillsProv = context.watch<SkillsProvider>();
+
+    final filteredSkills = skillsProv.filteredSkills(
+      userLat: profile?.homeLat ?? _center.latitude,
+      userLng: profile?.homeLng ?? _center.longitude,
+    );
+
+    return Scaffold(
+      backgroundColor: kBgDark,
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          _buildRadarTab(filteredSkills, profile),
+          _buildSkillsTab(filteredSkills, skillsProv),
+          if (auth.isAuthenticated)
+            const ProfileScreen()
+          else
+            _buildLoginPrompt(),
+        ],
+      ),
+      bottomNavigationBar: _buildBottomNav(auth),
+      floatingActionButton: auth.isAuthenticated && _currentIndex == 0
+          ? FloatingActionButton.extended(
+              onPressed: () => _openAddSkill(context),
+              backgroundColor: kNeonOrange,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('Skill anbieten',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+            )
+          : null,
+    );
+  }
+
+  Widget _buildRadarTab(List<Skill> skills, Profile? profile) {
+    return Stack(
+      children: [
+        FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: _center,
+            initialZoom: 12,
+          ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.nexus.app',
+              additionalOptions: const {
+                'attribution': '© OpenStreetMap contributors',
+              },
+            ),
+            MarkerLayer(markers: _buildMarkers(skills, profile)),
+          ],
+        ),
+        _buildRadarOverlay(skills),
+        if (_selectedSkill != null) _buildSkillPopup(_selectedSkill!),
+      ],
+    );
+  }
+
+  List<Marker> _buildMarkers(List<Skill> skills, Profile? profile) {
+    final markers = <Marker>[];
+
+    if (profile?.homeLat != null) {
+      markers.add(
+        Marker(
+          point: LatLng(profile!.homeLat!, profile.homeLng!),
+          width: 40,
+          height: 40,
+          child: GestureDetector(
+            onTap: () {},
+            child: Container(
+              decoration: BoxDecoration(
+                color: kNeonOrange,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: kNeonOrange.withOpacity(0.5),
+                    blurRadius: 12,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.home, color: Colors.white, size: 20),
+            ),
+          ),
+        ),
+      );
+    }
+
+    for (final skill in skills) {
+      markers.add(
+        Marker(
+          point: LatLng(skill.lat, skill.lng),
+          width: 44,
+          height: 44,
+          child: GestureDetector(
+            onTap: () => _selectSkill(skill),
+            child: Container(
+              decoration: BoxDecoration(
+                color: kBgCard,
+                shape: BoxShape.circle,
+                border: Border.all(color: kNeonOrange, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.4),
+                    blurRadius: 8,
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.bolt, color: kNeonOrange, size: 22),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return markers;
+  }
+
+  Widget _buildRadarOverlay(List<Skill> skills) {
+    final skillsProv = context.watch<SkillsProvider>();
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: SafeArea(
+        child: Container(
+          margin: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: kBgDark.withOpacity(0.92),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: kBorderColor),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: kNeonOrange,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.bolt, color: Colors.black, size: 18),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text('Nexus Radar',
+                      style: TextStyle(
+                          color: kTextPrimary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16)),
+                  const Spacer(),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: kSuccess.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: kSuccess.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: const BoxDecoration(
+                            color: kSuccess,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text('${skills.length} Skills',
+                            style: const TextStyle(
+                                color: kSuccess,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                onChanged: skillsProv.setQuery,
+                decoration: const InputDecoration(
+                  hintText: 'Skills suchen...',
+                  prefixIcon: Icon(Icons.search, color: kTextMuted, size: 18),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+                style: const TextStyle(color: kTextPrimary, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.radar, color: kTextMuted, size: 16),
+                  const SizedBox(width: 6),
+                  Text(
+                    skillsProv.radiusKm >= 500
+                        ? 'Bundesweit'
+                        : '${skillsProv.radiusKm.round()} km',
+                    style: const TextStyle(
+                        color: kTextSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500),
+                  ),
+                  Expanded(
+                    child: Slider(
+                      value: skillsProv.radiusKm.clamp(1, 500),
+                      min: 1,
+                      max: 500,
+                      onChanged: skillsProv.setRadius,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSkillPopup(Skill skill) {
+    final summary = context.watch<RatingsProvider>().getSummary(skill.userId);
+    final auth = context.watch<AuthProvider>();
+    final canRate = auth.isAuthenticated && auth.currentUser!.id != skill.userId;
+
+    return Positioned(
+      bottom: 80,
+      left: 16,
+      right: 16,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: kBgCard,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: kNeonOrange.withOpacity(0.4)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.5),
+              blurRadius: 20,
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 20,
+                  backgroundColor: kBgCardElevated,
+                  backgroundImage: skill.avatarUrl != null
+                      ? NetworkImage(skill.avatarUrl!)
+                      : null,
+                  child: skill.avatarUrl == null
+                      ? Text(
+                          skill.userName?.substring(0, 1).toUpperCase() ?? '?',
+                          style: const TextStyle(
+                              color: kNeonOrange, fontWeight: FontWeight.w700))
+                      : null,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(skill.skillTitle,
+                          style: const TextStyle(
+                              color: kTextPrimary,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15)),
+                      Text(skill.userName ?? '',
+                          style: const TextStyle(
+                              color: kTextSecondary, fontSize: 12)),
+                      const SizedBox(height: 2),
+                      if (summary != null)
+                        StarRatingBar(
+                          rating: summary.avg,
+                          count: summary.count,
+                          size: 13,
+                        ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: kNeonOrange.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '${skill.pointsPerHour} Pts/h',
+                    style: const TextStyle(
+                        color: kNeonOrange,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(skill.description,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: kTextSecondary, fontSize: 13, height: 1.4)),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                if (canRate)
+                  TextButton.icon(
+                    onPressed: () => _openRatingDialog(skill),
+                    icon: const Icon(Icons.star_outline_rounded,
+                        size: 16, color: kNeonOrange),
+                    label: const Text('Bewerten',
+                        style: TextStyle(color: kNeonOrange, fontSize: 13)),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      backgroundColor: kNeonOrange.withOpacity(0.1),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => setState(() => _selectedSkill = null),
+                  child: const Icon(Icons.close, color: kTextMuted, size: 20),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSkillsTab(List<Skill> skills, SkillsProvider skillsProv) {
+    return CustomScrollView(
+      slivers: [
+        SliverAppBar(
+          pinned: true,
+          title: const Text('Skills entdecken'),
+          backgroundColor: kBgDark,
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(60),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: TextField(
+                onChanged: skillsProv.setQuery,
+                decoration: const InputDecoration(
+                  hintText: 'Skills suchen...',
+                  prefixIcon: Icon(Icons.search, color: kTextMuted, size: 18),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+                style: const TextStyle(color: kTextPrimary, fontSize: 14),
+              ),
+            ),
+          ),
+        ),
+        skillsProv.loading
+            ? const SliverFillRemaining(
+                child: Center(
+                    child: CircularProgressIndicator(color: kNeonOrange)))
+            : skillsProv.error != null
+                ? SliverFillRemaining(
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.cloud_off,
+                                color: kError, size: 48),
+                            const SizedBox(height: 12),
+                            const Text('Fehler beim Laden',
+                                style: TextStyle(
+                                    color: kTextPrimary,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 16)),
+                            const SizedBox(height: 8),
+                            Text(skillsProv.error!,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                    color: kTextSecondary, fontSize: 12)),
+                            const SizedBox(height: 16),
+                            ElevatedButton.icon(
+                              onPressed: skillsProv.loadSkills,
+                              icon: const Icon(Icons.refresh, size: 16),
+                              label: const Text('Erneut versuchen'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )
+            : skills.isEmpty
+                ? const SliverFillRemaining(
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.search_off, color: kTextMuted, size: 48),
+                          SizedBox(height: 12),
+                          Text('Keine Skills gefunden',
+                              style: TextStyle(color: kTextSecondary)),
+                        ],
+                      ),
+                    ),
+                  )
+                : SliverPadding(
+                    padding: const EdgeInsets.all(16),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (ctx, i) => SkillCardWidget(skill: skills[i]),
+                        childCount: skills.length,
+                      ),
+                    ),
+                  ),
+      ],
+    );
+  }
+
+  Widget _buildLoginPrompt() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: kNeonOrange.withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.person_outline,
+                  color: kNeonOrange, size: 36),
+            ),
+            const SizedBox(height: 16),
+            const Text('Melde dich an',
+                style: TextStyle(
+                    color: kTextPrimary,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            const Text(
+              'Erstelle ein Profil, um Skills anzubieten und zu tauschen.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: kTextSecondary, fontSize: 14, height: 1.5),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const AuthScreen())),
+              child: const Text('Anmelden / Registrieren'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomNav(AuthProvider auth) {
+    return BottomNavigationBar(
+      currentIndex: _currentIndex,
+      onTap: (i) => setState(() => _currentIndex = i),
+      backgroundColor: kBgCard,
+      selectedItemColor: kNeonOrange,
+      unselectedItemColor: kTextMuted,
+      type: BottomNavigationBarType.fixed,
+      elevation: 0,
+      items: [
+        const BottomNavigationBarItem(
+          icon: Icon(Icons.radar),
+          label: 'Radar',
+        ),
+        const BottomNavigationBarItem(
+          icon: Icon(Icons.grid_view),
+          label: 'Skills',
+        ),
+        BottomNavigationBarItem(
+          icon: auth.isAuthenticated
+              ? const Icon(Icons.person)
+              : const Icon(Icons.login),
+          label: auth.isAuthenticated ? 'Profil' : 'Anmelden',
+        ),
+      ],
+    );
+  }
+
+  void _selectSkill(Skill skill) {
+    setState(() => _selectedSkill = skill);
+    context.read<RatingsProvider>().loadForUser(skill.userId);
+  }
+
+  void _openAddSkill(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const AddSkillScreen()),
+    );
+  }
+
+  void _openRatingDialog(Skill skill) {
+    final auth = context.read<AuthProvider>();
+    if (!auth.isAuthenticated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bitte anmelden um zu bewerten')),
+      );
+      return;
+    }
+    if (auth.currentUser!.id == skill.userId) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Du kannst dich nicht selbst bewerten')),
+      );
+      return;
+    }
+
+    int selectedRating = 0;
+    final commentCtrl = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => Padding(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: const BoxDecoration(
+              color: kBgCard,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: kBorderColor,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  '${skill.userName ?? "Person"} bewerten',
+                  style: const TextStyle(
+                      color: kTextPrimary,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700),
+                ),
+                Text(
+                  skill.skillTitle,
+                  style: const TextStyle(color: kTextSecondary, fontSize: 13),
+                ),
+                const SizedBox(height: 24),
+                InteractiveStarRating(
+                  initialRating: selectedRating,
+                  size: 40,
+                  onChanged: (v) => setModalState(() => selectedRating = v),
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: commentCtrl,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Kommentar (optional)',
+                    hintText: 'Wie war die Zusammenarbeit?',
+                  ),
+                  style: const TextStyle(color: kTextPrimary),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: selectedRating == 0
+                        ? null
+                        : () async {
+                            final profile =
+                                context.read<ProfileProvider>().profile;
+                            final err = await context
+                                .read<RatingsProvider>()
+                                .submitRating(
+                                  ratedUserId: skill.userId,
+                                  rating: selectedRating,
+                                  raterName: profile?.userName,
+                                  comment: commentCtrl.text.trim().isEmpty
+                                      ? null
+                                      : commentCtrl.text.trim(),
+                                  skillId: skill.id,
+                                );
+                            if (!mounted) return;
+                            Navigator.pop(ctx);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(err == null
+                                    ? 'Bewertung gespeichert!'
+                                    : 'Fehler: $err'),
+                              ),
+                            );
+                          },
+                    child: const Text('Bewertung abgeben'),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

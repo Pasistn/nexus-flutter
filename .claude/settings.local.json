@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(where flutter *)",
+      "Read(//c/Users/Pxwny/**)",
+      "Read(//c/flutter/**)",
+      "Read(//c//**)",
+      "PowerShell($env:Path += \";C:\\\\flutter\\\\bin\"; flutter devices)",
+      "Bash(flutter pub *)",
+      "Bash(xargs grep *)",
+      "Bash(xargs wc *)"
+    ]
+  }
+}
