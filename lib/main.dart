@@ -9,6 +9,7 @@ import 'providers/chat_provider.dart';
 import 'providers/profile_provider.dart';
 import 'providers/ratings_provider.dart';
 import 'providers/skill_request_provider.dart';
+import 'providers/category_provider.dart';
 import 'providers/skills_provider.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/landing/landing_screen.dart';
@@ -34,6 +35,7 @@ class NexusApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => ProfileProvider()),
         ChangeNotifierProvider(create: (_) => SkillsProvider()),
+        ChangeNotifierProvider(create: (_) => CategoryProvider()),
         ChangeNotifierProvider(create: (_) => RatingsProvider()),
         ChangeNotifierProvider(create: (_) => ChatProvider()),
         ChangeNotifierProvider(create: (_) => SkillRequestProvider()),

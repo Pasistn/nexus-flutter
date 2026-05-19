@@ -99,7 +99,7 @@ ThemeData buildNexusTheme() {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: kNeonOrange, width: 1.5),
+        borderSide: const BorderSide(color: Color(0xFFD1D5DB), width: 1.5),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),

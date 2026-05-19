@@ -11,4 +11,5 @@ class SupabaseConstants {
   static const String conversationMembersTable = 'conversation_members';
   static const String messagesTable = 'messages';
   static const String skillRequestsTable = 'skill_requests';
+  static const String categoriesTable = 'categories';
 }

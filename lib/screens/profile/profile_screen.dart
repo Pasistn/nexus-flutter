@@ -109,7 +109,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       homeAddress: _addressCtrl.text.trim(),
       homeLat: _pendingLat ?? existing?.homeLat,
       homeLng: _pendingLng ?? existing?.homeLng,
-      skillPoints: existing?.skillPoints ?? 0,
     );
 
     final err = await profileProv.upsertProfile(updated);

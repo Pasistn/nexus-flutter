@@ -356,12 +356,6 @@ class _LandingScreenState extends State<LandingScreen> {
         'Finde Menschen in deinem direkten Umkreis. Der Radar zeigt dir in Echtzeit an, wer gerade aktiv ist.',
       ),
       (
-        '🤝',
-        const Color(0xFFFEF3C7),
-        'SKILL-POINTS',
-        'Zahle nicht mit Euro. Verdiene Skillpoints durch eigene Hilfe und gib sie für Dinge aus, die du lernen willst.',
-      ),
-      (
         '🛡️',
         const Color(0xFFDBEAFE),
         'SICHERE BASIS',
@@ -567,21 +561,6 @@ class _LandingScreenState extends State<LandingScreen> {
                             color: _kGray, fontSize: 11),
                       ),
                     ],
-                  ),
-                ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: _kBlue.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(7),
-                  ),
-                  child: Text(
-                    '${skill.pointsPerHour} Pts/h',
-                    style: GoogleFonts.poppins(
-                        color: _kBlue,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 11),
                   ),
                 ),
                 const SizedBox(width: 8),
