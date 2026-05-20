@@ -11,6 +11,8 @@ import '../../providers/chat_provider.dart';
 import '../../providers/profile_provider.dart';
 import '../../providers/ratings_provider.dart';
 import '../../providers/skill_request_provider.dart';
+import '../../models/category.dart' show SkillCategory;
+import '../../providers/category_provider.dart';
 import '../../providers/skills_provider.dart';
 import '../../screens/auth/auth_screen.dart';
 import '../../screens/chat/chat_list_screen.dart';
@@ -30,6 +32,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final MapController _mapController = MapController();
   LatLng _center = const LatLng(48.1351, 11.5820);
+  bool _hasUserLocation = false;
   int _currentIndex = 0;
   Skill? _selectedSkill;
 
@@ -42,6 +45,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _init() async {
     final skills = context.read<SkillsProvider>();
     await skills.loadSkills();
+    context.read<CategoryProvider>().loadCategories();
 
     final profile = context.read<ProfileProvider>();
     final auth = context.read<AuthProvider>();
@@ -76,7 +80,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _moveTo(LatLng latlng) {
-    setState(() => _center = latlng);
+    setState(() {
+      _center = latlng;
+      _hasUserLocation = true;
+    });
     _mapController.move(latlng, 12);
   }
 
@@ -88,9 +95,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final pendingCount =
         context.watch<SkillRequestProvider>().pendingCount;
 
+    final bool locationKnown =
+        profile?.homeLat != null || _hasUserLocation;
     final filteredSkills = skillsProv.filteredSkills(
-      userLat: profile?.homeLat ?? _center.latitude,
-      userLng: profile?.homeLng ?? _center.longitude,
+      userLat: locationKnown ? (profile?.homeLat ?? _center.latitude) : null,
+      userLng: locationKnown ? (profile?.homeLng ?? _center.longitude) : null,
     );
 
     return Scaffold(
@@ -395,21 +404,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: kNeonOrange.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    '${skill.pointsPerHour} Pts/h',
-                    style: const TextStyle(
-                        color: kNeonOrange,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12),
-                  ),
-                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -468,6 +462,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildSkillsTab(
       List<Skill> skills, SkillsProvider skillsProv) {
     final auth = context.watch<AuthProvider>();
+    final categories = context.watch<CategoryProvider>().categories;
     return CustomScrollView(
       slivers: [
         SliverAppBar(
@@ -492,6 +487,10 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
+        if (categories.isNotEmpty)
+          SliverToBoxAdapter(
+            child: _buildCategoryFilter(categories, skillsProv),
+          ),
         skillsProv.loading
             ? const SliverFillRemaining(
                 child: Center(
@@ -555,6 +554,72 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
       ],
+    );
+  }
+
+  Widget _buildCategoryFilter(
+      List<SkillCategory> categories, SkillsProvider skillsProv) {
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          _buildFilterChip(
+            label: 'Alle',
+            icon: null,
+            selected: skillsProv.selectedCategoryId == null,
+            onTap: () => skillsProv.setCategory(null),
+          ),
+          ...categories.map((cat) => _buildFilterChip(
+                label: cat.name,
+                icon: cat.icon,
+                selected: skillsProv.selectedCategoryId == cat.id,
+                onTap: () => skillsProv.setCategory(cat.id),
+              )),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChip({
+    required String label,
+    required String? icon,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        margin: const EdgeInsets.only(right: 8, bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? kNeonOrange.withOpacity(0.15) : kBgCard,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? kNeonOrange : kBorderColor,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Text(icon, style: const TextStyle(fontSize: 13)),
+              const SizedBox(width: 5),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? kNeonOrange : kTextSecondary,
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -664,18 +729,18 @@ class _HomeScreenState extends State<HomeScreen> {
       elevation: 0,
       items: [
         const BottomNavigationBarItem(
-          icon: Icon(Icons.radar),
+          icon: Icon(Icons.explore_rounded),
           label: 'Radar',
         ),
         const BottomNavigationBarItem(
-          icon: Icon(Icons.grid_view),
+          icon: Icon(Icons.grid_view_rounded),
           label: 'Skills',
         ),
         BottomNavigationBarItem(
           icon: Stack(
             clipBehavior: Clip.none,
             children: [
-              const Icon(Icons.chat_bubble_outline),
+              const Icon(Icons.chat_bubble_outline_rounded),
               if (pendingCount > 0)
                 Positioned(
                   right: -6,
@@ -701,8 +766,8 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         BottomNavigationBarItem(
           icon: auth.isAuthenticated
-              ? const Icon(Icons.person)
-              : const Icon(Icons.login),
+              ? const Icon(Icons.person_rounded)
+              : const Icon(Icons.login_rounded),
           label: auth.isAuthenticated ? 'Profil' : 'Anmelden',
         ),
       ],

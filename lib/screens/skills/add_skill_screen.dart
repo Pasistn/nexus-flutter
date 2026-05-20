@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
+import '../../models/category.dart' show SkillCategory;
 import '../../models/skill.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/category_provider.dart';
 import '../../providers/profile_provider.dart';
 import '../../providers/skills_provider.dart';
 import '../../services/geocoding_service.dart';
@@ -21,11 +23,19 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
   final _descCtrl = TextEditingController();
   final _locationCtrl = TextEditingController();
   final _tagsCtrl = TextEditingController();
-  int _pointsPerHour = 5;
   double? _lat, _lng;
   bool _locating = false;
   bool _saving = false;
   String? _error;
+  SkillCategory? _selectedCategory;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<CategoryProvider>().loadCategories();
+    });
+  }
 
   @override
   void dispose() {
@@ -81,6 +91,10 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_selectedCategory == null) {
+      setState(() => _error = 'Bitte wähle eine Kategorie aus.');
+      return;
+    }
     if (_lat == null || _lng == null) {
       setState(() => _error = 'Bitte gib einen Standort an.');
       return;
@@ -107,10 +121,10 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
       avatarUrl: profile?.avatarUrl,
       skillTitle: _titleCtrl.text.trim(),
       description: _descCtrl.text.trim(),
-      pointsPerHour: _pointsPerHour,
       lat: _lat!,
       lng: _lng!,
       tags: tags,
+      categoryId: _selectedCategory!.id,
     );
 
     final err = await context.read<SkillsProvider>().addSkill(skill);
@@ -128,6 +142,8 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final categories = context.watch<CategoryProvider>().categories;
+
     return Scaffold(
       backgroundColor: kBgDark,
       appBar: AppBar(title: const Text('Skill anbieten')),
@@ -169,65 +185,14 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
                       : null,
                 ),
                 const SizedBox(height: 14),
+                _buildCategoryPicker(categories),
+                const SizedBox(height: 14),
                 TextFormField(
                   controller: _tagsCtrl,
                   decoration: const InputDecoration(
                     labelText: 'Tags (kommagetrennt)',
                     hintText: 'Musik, Anfänger, Online',
                     prefixIcon: Icon(Icons.tag, color: kTextMuted, size: 20),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                _buildSectionHeader('Preis in Skill-Punkten', Icons.bolt),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: kBgCard,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: kBorderColor),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Punkte pro Stunde',
-                              style: TextStyle(
-                                  color: kTextSecondary, fontSize: 14)),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: kNeonOrange.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              '$_pointsPerHour Pts/h',
-                              style: const TextStyle(
-                                  color: kNeonOrange,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 16),
-                            ),
-                          ),
-                        ],
-                      ),
-                      Slider(
-                        value: _pointsPerHour.toDouble(),
-                        min: 1,
-                        max: 50,
-                        divisions: 49,
-                        onChanged: (v) =>
-                            setState(() => _pointsPerHour = v.round()),
-                      ),
-                      const Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('1', style: TextStyle(color: kTextMuted, fontSize: 11)),
-                          Text('50', style: TextStyle(color: kTextMuted, fontSize: 11)),
-                        ],
-                      ),
-                    ],
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -325,6 +290,73 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildCategoryPicker(List<SkillCategory> categories) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.category_outlined, color: kNeonOrange, size: 18),
+            const SizedBox(width: 8),
+            const Text('Kategorie *',
+                style: TextStyle(
+                    color: kTextPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16)),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (categories.isEmpty)
+          const Center(
+              child: CircularProgressIndicator(color: kNeonOrange, strokeWidth: 2))
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: categories.map((SkillCategory cat) {
+              final selected = _selectedCategory?.id == cat.id;
+              return GestureDetector(
+                onTap: () => setState(() => _selectedCategory = cat),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? kNeonOrange.withOpacity(0.15)
+                        : kBgCard,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: selected ? kNeonOrange : kBorderColor,
+                      width: selected ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (cat.icon != null) ...[
+                        Text(cat.icon!, style: const TextStyle(fontSize: 15)),
+                        const SizedBox(width: 6),
+                      ],
+                      Text(
+                        cat.name,
+                        style: TextStyle(
+                          color: selected ? kNeonOrange : kTextSecondary,
+                          fontSize: 13,
+                          fontWeight: selected
+                              ? FontWeight.w700
+                              : FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+      ],
     );
   }
 

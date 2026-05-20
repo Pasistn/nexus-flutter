@@ -71,7 +71,6 @@ class _SkillCardWidgetState extends State<SkillCardWidget> {
                   ],
                 ),
               ),
-              _buildPointsBadge(),
             ],
           ),
           const SizedBox(height: 10),
@@ -80,8 +79,12 @@ class _SkillCardWidgetState extends State<SkillCardWidget> {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                   color: kTextSecondary, fontSize: 13, height: 1.4)),
-          if (widget.skill.tags.isNotEmpty) ...[
+          if (widget.skill.categoryName != null) ...[
             const SizedBox(height: 10),
+            _buildCategoryBadge(widget.skill.categoryName!, widget.skill.categoryIcon),
+          ],
+          if (widget.skill.tags.isNotEmpty) ...[
+            const SizedBox(height: 8),
             Wrap(
               spacing: 6,
               runSpacing: 6,
@@ -109,18 +112,27 @@ class _SkillCardWidgetState extends State<SkillCardWidget> {
     );
   }
 
-  Widget _buildPointsBadge() {
+  Widget _buildCategoryBadge(String name, String? icon) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        color: kNeonOrange.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: kNeonOrange.withOpacity(0.3)),
+        color: kNeonOrange.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: kNeonOrange.withOpacity(0.35)),
       ),
-      child: Text(
-        '${widget.skill.pointsPerHour} Pts/h',
-        style: const TextStyle(
-            color: kNeonOrange, fontWeight: FontWeight.w700, fontSize: 12),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Text(icon, style: const TextStyle(fontSize: 12)),
+            const SizedBox(width: 5),
+          ],
+          Text(name,
+              style: const TextStyle(
+                  color: kNeonOrange,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600)),
+        ],
       ),
     );
   }
