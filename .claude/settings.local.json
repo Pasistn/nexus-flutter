@@ -9,7 +9,12 @@
       "Bash(flutter pub *)",
       "Bash(xargs grep *)",
       "Bash(xargs wc *)",
-      "Bash(flutter analyze *)"
+      "Bash(flutter analyze *)",
+      "Bash(java -version)",
+      "Bash(where java *)",
+      "PowerShell(Get-Command java -ErrorAction SilentlyContinue)",
+      "PowerShell($env:JAVA_HOME)",
+      "PowerShell(winget install EclipseAdoptium.Temurin.17.JDK --accept-source-agreements --accept-package-agreements)"
     ]
   }
 }
