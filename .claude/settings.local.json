@@ -14,7 +14,9 @@
       "Bash(where java *)",
       "PowerShell(Get-Command java -ErrorAction SilentlyContinue)",
       "PowerShell($env:JAVA_HOME)",
-      "PowerShell(winget install EclipseAdoptium.Temurin.17.JDK --accept-source-agreements --accept-package-agreements)"
+      "PowerShell(winget install EclipseAdoptium.Temurin.17.JDK --accept-source-agreements --accept-package-agreements)",
+      "Bash(Get-ChildItem -Path . -Directory)",
+      "Bash(Select-Object Name)"
     ]
   }
 }

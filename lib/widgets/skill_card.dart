@@ -32,20 +32,26 @@ class _SkillCardWidgetState extends State<SkillCardWidget> {
         .watch<RatingsProvider>()
         .getSummary(widget.skill.userId);
 
+    final isSearching = widget.skill.skillType == 'searching';
+    final accentColor = isSearching ? kError : kNeonOrange;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: kBgCard,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: kBorderColor),
+        border: Border.all(
+          color: isSearching ? kError.withOpacity(0.5) : kBorderColor,
+          width: isSearching ? 1.5 : 1,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              _buildAvatar(),
+              _buildAvatar(accentColor),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -71,6 +77,7 @@ class _SkillCardWidgetState extends State<SkillCardWidget> {
                   ],
                 ),
               ),
+              _buildTypeBadge(isSearching),
             ],
           ),
           const SizedBox(height: 10),
@@ -81,7 +88,7 @@ class _SkillCardWidgetState extends State<SkillCardWidget> {
                   color: kTextSecondary, fontSize: 13, height: 1.4)),
           if (widget.skill.categoryName != null) ...[
             const SizedBox(height: 10),
-            _buildCategoryBadge(widget.skill.categoryName!, widget.skill.categoryIcon),
+            _buildCategoryBadge(widget.skill.categoryName!, widget.skill.categoryIcon, accentColor),
           ],
           if (widget.skill.tags.isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -96,7 +103,7 @@ class _SkillCardWidgetState extends State<SkillCardWidget> {
     );
   }
 
-  Widget _buildAvatar() {
+  Widget _buildAvatar(Color accentColor) {
     return CircleAvatar(
       radius: 20,
       backgroundColor: kBgCardElevated,
@@ -106,19 +113,44 @@ class _SkillCardWidgetState extends State<SkillCardWidget> {
       child: widget.skill.avatarUrl == null
           ? Text(
               widget.skill.userName?.substring(0, 1).toUpperCase() ?? '?',
-              style: const TextStyle(
-                  color: kNeonOrange, fontWeight: FontWeight.w700))
+              style: TextStyle(
+                  color: accentColor, fontWeight: FontWeight.w700))
           : null,
     );
   }
 
-  Widget _buildCategoryBadge(String name, String? icon) {
+  Widget _buildTypeBadge(bool isSearching) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: isSearching
+            ? kError.withOpacity(0.10)
+            : kNeonOrange.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: isSearching
+              ? kError.withOpacity(0.4)
+              : kNeonOrange.withOpacity(0.4),
+        ),
+      ),
+      child: Text(
+        isSearching ? 'Suche' : 'Angebot',
+        style: TextStyle(
+          color: isSearching ? kError : kNeonOrange,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCategoryBadge(String name, String? icon, Color accentColor) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        color: kNeonOrange.withOpacity(0.08),
+        color: accentColor.withOpacity(0.08),
         borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: kNeonOrange.withOpacity(0.35)),
+        border: Border.all(color: accentColor.withOpacity(0.35)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -128,8 +160,8 @@ class _SkillCardWidgetState extends State<SkillCardWidget> {
             const SizedBox(width: 5),
           ],
           Text(name,
-              style: const TextStyle(
-                  color: kNeonOrange,
+              style: TextStyle(
+                  color: accentColor,
                   fontSize: 11,
                   fontWeight: FontWeight.w600)),
         ],

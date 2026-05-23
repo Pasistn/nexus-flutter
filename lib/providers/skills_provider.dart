@@ -13,6 +13,8 @@ class SkillsProvider extends ChangeNotifier {
   String _query = '';
   double _radiusKm = 500;
   String? _selectedCategoryId;
+  // null = show all, 'offering' = only offerings, 'searching' = only searches
+  String? _typeFilter;
   RealtimeChannel? _channel;
 
   List<Skill> get allSkills => _allSkills;
@@ -21,9 +23,32 @@ class SkillsProvider extends ChangeNotifier {
   String get query => _query;
   double get radiusKm => _radiusKm;
   String? get selectedCategoryId => _selectedCategoryId;
+  String? get typeFilter => _typeFilter;
 
+  /// Full filtered list for the Skills tab (includes type filter).
   List<Skill> filteredSkills({double? userLat, double? userLng}) {
-    var result = _allSkills;
+    return _applyFilters(_allSkills,
+        userLat: userLat, userLng: userLng, applyTypeFilter: true);
+  }
+
+  /// Filtered list for the Radar map — type filter is intentionally excluded
+  /// so both offerings and searches always appear as markers.
+  List<Skill> filteredSkillsForRadar({double? userLat, double? userLng}) {
+    return _applyFilters(_allSkills,
+        userLat: userLat, userLng: userLng, applyTypeFilter: false);
+  }
+
+  List<Skill> _applyFilters(
+    List<Skill> source, {
+    double? userLat,
+    double? userLng,
+    required bool applyTypeFilter,
+  }) {
+    var result = source;
+
+    if (applyTypeFilter && _typeFilter != null) {
+      result = result.where((s) => s.skillType == _typeFilter).toList();
+    }
 
     if (_selectedCategoryId != null) {
       result = result.where((s) => s.categoryId == _selectedCategoryId).toList();
@@ -61,6 +86,11 @@ class SkillsProvider extends ChangeNotifier {
 
   void setCategory(String? categoryId) {
     _selectedCategoryId = categoryId;
+    notifyListeners();
+  }
+
+  void setTypeFilter(String? type) {
+    _typeFilter = type;
     notifyListeners();
   }
 

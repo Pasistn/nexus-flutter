@@ -13,6 +13,8 @@ class Skill {
   final String? categoryId;
   final String? categoryName;
   final String? categoryIcon;
+  // 'offering' = user offers this skill, 'searching' = user is looking for this skill
+  final String skillType;
 
   const Skill({
     required this.id,
@@ -29,6 +31,7 @@ class Skill {
     this.categoryId,
     this.categoryName,
     this.categoryIcon,
+    this.skillType = 'offering',
   });
 
   factory Skill.fromJson(Map<String, dynamic> json) {
@@ -52,6 +55,7 @@ class Skill {
       categoryId: json['category_id'] as String?,
       categoryName: catJson?['name'] as String?,
       categoryIcon: catJson?['icon'] as String?,
+      skillType: json['skill_type'] as String? ?? 'offering',
     );
   }
 
@@ -66,5 +70,6 @@ class Skill {
         'tags': tags,
         'category_id': categoryId,
         'points_per_hour': 0,
+        'skill_type': skillType,
       };
 }

@@ -97,18 +97,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final bool locationKnown =
         profile?.homeLat != null || _hasUserLocation;
-    final filteredSkills = skillsProv.filteredSkills(
-      userLat: locationKnown ? (profile?.homeLat ?? _center.latitude) : null,
-      userLng: locationKnown ? (profile?.homeLng ?? _center.longitude) : null,
-    );
+    final userLat = locationKnown ? (profile?.homeLat ?? _center.latitude) : null;
+    final userLng = locationKnown ? (profile?.homeLng ?? _center.longitude) : null;
+
+    // Radar always shows all skill types regardless of the Skills-tab type filter.
+    final radarSkills = skillsProv.filteredSkillsForRadar(
+        userLat: userLat, userLng: userLng);
+    // Skills tab respects the type filter (Alle / Angebote / Gesuche).
+    final listSkills = skillsProv.filteredSkills(
+        userLat: userLat, userLng: userLng);
 
     return Scaffold(
       backgroundColor: kBgDark,
       body: IndexedStack(
         index: _currentIndex,
         children: [
-          _buildRadarTab(filteredSkills, profile),
-          _buildSkillsTab(filteredSkills, skillsProv),
+          _buildRadarTab(radarSkills, profile),
+          _buildSkillsTab(listSkills, skillsProv),
           if (auth.isAuthenticated)
             const ChatListScreen()
           else
@@ -121,13 +126,13 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       bottomNavigationBar:
           _buildBottomNav(auth, pendingCount),
-      floatingActionButton: auth.isAuthenticated && _currentIndex == 0
+      floatingActionButton: auth.isAuthenticated && (_currentIndex == 0 || _currentIndex == 1)
           ? FloatingActionButton.extended(
-              onPressed: () => _openAddSkill(context),
+              onPressed: () => _openAddSkillDialog(context),
               backgroundColor: kNeonOrange,
               foregroundColor: Colors.white,
               icon: const Icon(Icons.add),
-              label: const Text('Skill anbieten',
+              label: const Text('Skill eintragen',
                   style: TextStyle(fontWeight: FontWeight.w700)),
             )
           : null,
@@ -192,6 +197,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     for (final skill in skills) {
+      final isSearching = skill.skillType == 'searching';
+      final markerColor = isSearching ? kError : kNeonOrange;
       markers.add(
         Marker(
           point: LatLng(skill.lat, skill.lng),
@@ -203,7 +210,7 @@ class _HomeScreenState extends State<HomeScreen> {
               decoration: BoxDecoration(
                 color: kBgCard,
                 shape: BoxShape.circle,
-                border: Border.all(color: kNeonOrange, width: 2),
+                border: Border.all(color: markerColor, width: 2),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.4),
@@ -211,7 +218,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
               ),
-              child: const Icon(Icons.bolt, color: kNeonOrange, size: 22),
+              child: Icon(
+                isSearching ? Icons.search : Icons.bolt,
+                color: markerColor,
+                size: 22,
+              ),
             ),
           ),
         ),
@@ -340,6 +351,8 @@ class _HomeScreenState extends State<HomeScreen> {
         auth.isAuthenticated && currentUserId != skill.userId;
     final canRequest =
         auth.isAuthenticated && currentUserId != skill.userId;
+    final popupAccent =
+        skill.skillType == 'searching' ? kError : kNeonOrange;
 
     return Positioned(
       bottom: 80,
@@ -351,7 +364,7 @@ class _HomeScreenState extends State<HomeScreen> {
           color: kBgCard,
           borderRadius: BorderRadius.circular(16),
           border:
-              Border.all(color: kNeonOrange.withOpacity(0.4)),
+              Border.all(color: popupAccent.withOpacity(0.4)),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.5),
@@ -487,6 +500,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
+        SliverToBoxAdapter(
+          child: _buildTypeFilter(skillsProv),
+        ),
         if (categories.isNotEmpty)
           SliverToBoxAdapter(
             child: _buildCategoryFilter(categories, skillsProv),
@@ -554,6 +570,89 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
       ],
+    );
+  }
+
+  Widget _buildTypeFilter(SkillsProvider skillsProv) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: kBgCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: kBorderColor),
+        ),
+        child: Row(
+          children: [
+            _buildTypeChip(
+              label: 'Alle',
+              icon: Icons.grid_view_rounded,
+              selected: skillsProv.typeFilter == null,
+              color: kNeonOrange,
+              onTap: () => skillsProv.setTypeFilter(null),
+            ),
+            _buildTypeChip(
+              label: 'Angebote',
+              icon: Icons.bolt,
+              selected: skillsProv.typeFilter == 'offering',
+              color: kNeonOrange,
+              onTap: () => skillsProv.setTypeFilter('offering'),
+            ),
+            _buildTypeChip(
+              label: 'Gesuche',
+              icon: Icons.search,
+              selected: skillsProv.typeFilter == 'searching',
+              color: kError,
+              onTap: () => skillsProv.setTypeFilter('searching'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTypeChip({
+    required String label,
+    required IconData icon,
+    required bool selected,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? color.withOpacity(0.12) : Colors.transparent,
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(
+              color: selected ? color : Colors.transparent,
+              width: 1.5,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon,
+                  size: 14,
+                  color: selected ? color : kTextMuted),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected ? color : kTextMuted,
+                  fontSize: 13,
+                  fontWeight:
+                      selected ? FontWeight.w700 : FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -779,9 +878,112 @@ class _HomeScreenState extends State<HomeScreen> {
     context.read<RatingsProvider>().loadForUser(skill.userId);
   }
 
-  void _openAddSkill(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const AddSkillScreen()),
+  void _openAddSkillDialog(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: kBgCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Was möchtest du eintragen?',
+              style: TextStyle(
+                color: kTextPrimary,
+                fontWeight: FontWeight.w700,
+                fontSize: 18,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Biete deine Fähigkeiten an oder suche jemanden, der dir helfen kann.',
+              style: TextStyle(color: kTextSecondary, fontSize: 13),
+            ),
+            const SizedBox(height: 20),
+            _buildSkillTypeOption(
+              icon: Icons.bolt,
+              color: kNeonOrange,
+              title: 'Skill anbieten',
+              subtitle: 'Ich kann anderen mit einer Fähigkeit helfen.',
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const AddSkillScreen(initialType: 'offering'),
+                ));
+              },
+            ),
+            const SizedBox(height: 12),
+            _buildSkillTypeOption(
+              icon: Icons.search,
+              color: kError,
+              title: 'Skill suchen',
+              subtitle: 'Ich suche jemanden, der mir helfen kann.',
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const AddSkillScreen(initialType: 'searching'),
+                ));
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSkillTypeOption({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withOpacity(0.35), width: 1.5),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          color: color,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: const TextStyle(
+                          color: kTextSecondary, fontSize: 12)),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, color: color, size: 20),
+          ],
+        ),
+      ),
     );
   }
 

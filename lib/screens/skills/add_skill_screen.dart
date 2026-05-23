@@ -11,7 +11,9 @@ import '../../providers/skills_provider.dart';
 import '../../services/geocoding_service.dart';
 
 class AddSkillScreen extends StatefulWidget {
-  const AddSkillScreen({super.key});
+  final String initialType;
+
+  const AddSkillScreen({super.key, this.initialType = 'offering'});
 
   @override
   State<AddSkillScreen> createState() => _AddSkillScreenState();
@@ -28,10 +30,12 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
   bool _saving = false;
   String? _error;
   SkillCategory? _selectedCategory;
+  late String _skillType;
 
   @override
   void initState() {
     super.initState();
+    _skillType = widget.initialType;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<CategoryProvider>().loadCategories();
     });
@@ -125,6 +129,7 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
       lng: _lng!,
       tags: tags,
       categoryId: _selectedCategory!.id,
+      skillType: _skillType,
     );
 
     final err = await context.read<SkillsProvider>().addSkill(skill);
@@ -143,10 +148,14 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
   @override
   Widget build(BuildContext context) {
     final categories = context.watch<CategoryProvider>().categories;
+    final isSearching = _skillType == 'searching';
+    final accentColor = isSearching ? kError : kNeonOrange;
 
     return Scaffold(
       backgroundColor: kBgDark,
-      appBar: AppBar(title: const Text('Skill anbieten')),
+      appBar: AppBar(
+        title: Text(isSearching ? 'Skill suchen' : 'Skill anbieten'),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
@@ -155,14 +164,22 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildSectionHeader('Was bietest du an?', Icons.bolt),
+                _buildTypeToggle(accentColor),
+                const SizedBox(height: 20),
+                _buildSectionHeader(
+                  isSearching ? 'Was suchst du?' : 'Was bietest du an?',
+                  isSearching ? Icons.search : Icons.bolt,
+                  accentColor,
+                ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _titleCtrl,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Skill-Titel *',
-                    hintText: 'z. B. Gitarrenunterricht für Anfänger',
-                    prefixIcon: Icon(Icons.title, color: kTextMuted, size: 20),
+                    hintText: isSearching
+                        ? 'z. B. Fahrrad-Reparatur'
+                        : 'z. B. Gitarrenunterricht für Anfänger',
+                    prefixIcon: const Icon(Icons.title, color: kTextMuted, size: 20),
                   ),
                   validator: (v) => (v == null || v.trim().isEmpty)
                       ? 'Bitte einen Titel eingeben'
@@ -172,11 +189,12 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
                 TextFormField(
                   controller: _descCtrl,
                   maxLines: 4,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Beschreibung *',
-                    hintText:
-                        'Beschreibe deine Fähigkeit, Erfahrung und was du anbietest...',
-                    prefixIcon: Icon(Icons.description_outlined,
+                    hintText: isSearching
+                        ? 'Beschreibe was du brauchst und wie du dir die Hilfe vorstellst...'
+                        : 'Beschreibe deine Fähigkeit, Erfahrung und was du anbietest...',
+                    prefixIcon: const Icon(Icons.description_outlined,
                         color: kTextMuted, size: 20),
                     alignLabelWithHint: true,
                   ),
@@ -185,7 +203,7 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
                       : null,
                 ),
                 const SizedBox(height: 14),
-                _buildCategoryPicker(categories),
+                _buildCategoryPicker(categories, accentColor),
                 const SizedBox(height: 14),
                 TextFormField(
                   controller: _tagsCtrl,
@@ -196,7 +214,7 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                _buildSectionHeader('Standort', Icons.location_on),
+                _buildSectionHeader('Standort', Icons.location_on, accentColor),
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -274,15 +292,23 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
                   width: double.infinity,
                   child: ElevatedButton.icon(
                     onPressed: _saving ? null : _submit,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: accentColor,
+                    ),
                     icon: _saving
                         ? const SizedBox(
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
-                                color: Colors.black, strokeWidth: 2))
-                        : const Icon(Icons.publish, size: 18),
-                    label:
-                        Text(_saving ? 'Wird veröffentlicht...' : 'Skill veröffentlichen'),
+                                color: Colors.white, strokeWidth: 2))
+                        : Icon(isSearching ? Icons.search : Icons.publish, size: 18),
+                    label: Text(
+                      _saving
+                          ? 'Wird veröffentlicht...'
+                          : isSearching
+                              ? 'Gesuch veröffentlichen'
+                              : 'Skill veröffentlichen',
+                    ),
                   ),
                 ),
               ],
@@ -293,13 +319,86 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
     );
   }
 
-  Widget _buildCategoryPicker(List<SkillCategory> categories) {
+  Widget _buildTypeToggle(Color accentColor) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: kBgCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: kBorderColor),
+      ),
+      child: Row(
+        children: [
+          _buildToggleOption(
+            label: 'Anbieten',
+            icon: Icons.bolt,
+            isSelected: _skillType == 'offering',
+            selectedColor: kNeonOrange,
+            onTap: () => setState(() => _skillType = 'offering'),
+          ),
+          _buildToggleOption(
+            label: 'Suchen',
+            icon: Icons.search,
+            isSelected: _skillType == 'searching',
+            selectedColor: kError,
+            onTap: () => setState(() => _skillType = 'searching'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToggleOption({
+    required String label,
+    required IconData icon,
+    required bool isSelected,
+    required Color selectedColor,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? selectedColor.withOpacity(0.12) : Colors.transparent,
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(
+              color: isSelected ? selectedColor : Colors.transparent,
+              width: 1.5,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon,
+                  size: 16,
+                  color: isSelected ? selectedColor : kTextMuted),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? selectedColor : kTextMuted,
+                  fontSize: 14,
+                  fontWeight:
+                      isSelected ? FontWeight.w700 : FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCategoryPicker(List<SkillCategory> categories, Color accentColor) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            const Icon(Icons.category_outlined, color: kNeonOrange, size: 18),
+            Icon(Icons.category_outlined, color: accentColor, size: 18),
             const SizedBox(width: 8),
             const Text('Kategorie *',
                 style: TextStyle(
@@ -310,8 +409,8 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
         ),
         const SizedBox(height: 10),
         if (categories.isEmpty)
-          const Center(
-              child: CircularProgressIndicator(color: kNeonOrange, strokeWidth: 2))
+          Center(
+              child: CircularProgressIndicator(color: accentColor, strokeWidth: 2))
         else
           Wrap(
             spacing: 8,
@@ -325,11 +424,11 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
                     color: selected
-                        ? kNeonOrange.withOpacity(0.15)
+                        ? accentColor.withOpacity(0.15)
                         : kBgCard,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: selected ? kNeonOrange : kBorderColor,
+                      color: selected ? accentColor : kBorderColor,
                       width: selected ? 1.5 : 1,
                     ),
                   ),
@@ -343,7 +442,7 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
                       Text(
                         cat.name,
                         style: TextStyle(
-                          color: selected ? kNeonOrange : kTextSecondary,
+                          color: selected ? accentColor : kTextSecondary,
                           fontSize: 13,
                           fontWeight: selected
                               ? FontWeight.w700
@@ -360,10 +459,10 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
     );
   }
 
-  Widget _buildSectionHeader(String title, IconData icon) {
+  Widget _buildSectionHeader(String title, IconData icon, Color accentColor) {
     return Row(
       children: [
-        Icon(icon, color: kNeonOrange, size: 18),
+        Icon(icon, color: accentColor, size: 18),
         const SizedBox(width: 8),
         Text(title,
             style: const TextStyle(
