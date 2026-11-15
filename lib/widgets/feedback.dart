@@ -109,33 +109,6 @@ class ButtonSpinner extends StatelessWidget {
   }
 }
 
-class CountBadge extends StatelessWidget {
-  const CountBadge(this.count, {super.key});
-
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      decoration: BoxDecoration(
-        color: kError,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        count > 9 ? '9+' : '$count',
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 9,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
-
 void showSnack(BuildContext context, String text, {bool error = false}) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
