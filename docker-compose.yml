@@ -9,4 +9,4 @@ services:
     container_name: nexus-web
     restart: unless-stopped
     ports:
-      - "${PORT:-8080}:80"
+      - "127.0.0.1:${PORT:-8080}:80"

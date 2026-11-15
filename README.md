@@ -54,7 +54,7 @@ supabase/
 
 ## Lokal starten
 
-Voraussetzungen: Flutter ≥ 3.32 und ein Supabase-Projekt.
+Voraussetzungen: Flutter ≥ 3.44 und ein Supabase-Projekt.
 
 1. **Datenbank einrichten** – die Dateien aus `supabase/migrations/` der Reihe nach im SQL-Editor ausführen oder mit der CLI:
    ```bash
@@ -81,9 +81,9 @@ nano .env
 docker compose up -d --build
 ```
 
-Die App läuft danach auf `http://<server>:8080` (Port über `PORT` in `.env` änderbar).
+Der Container lauscht danach nur lokal auf `127.0.0.1:8080` (Port über `PORT` in `.env` änderbar) und ist von außen nicht direkt erreichbar.
 
-**HTTPS ist Pflicht**, weil Browser Standortabfragen nur über HTTPS erlauben. Am einfachsten mit einem Reverse Proxy davor, z. B. Caddy:
+**HTTPS ist Pflicht**, weil Browser Standortabfragen nur über HTTPS erlauben. Davor gehört deshalb ein Reverse Proxy, z. B. Caddy, der das Zertifikat automatisch holt:
 
 ```
 nexus.example.com {

@@ -81,6 +81,21 @@ class SkillActionBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!skill.hasOwner) {
+      return const Row(
+        children: [
+          Icon(Icons.info_outline_rounded, size: 16, color: kTextMuted),
+          SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'Beispiel-Eintrag – keine Kontaktaufnahme möglich',
+              style: TextStyle(fontSize: 12.5, color: kTextMuted),
+            ),
+          ),
+        ],
+      );
+    }
+
     final padding = EdgeInsets.symmetric(vertical: compact ? 8 : 10);
 
     return Row(

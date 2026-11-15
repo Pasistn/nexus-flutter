@@ -34,6 +34,7 @@ class Skill {
   final String? categoryIcon;
 
   bool get isSearch => type == SkillType.searching;
+  bool get hasOwner => userId.isNotEmpty;
 
   factory Skill.fromJson(Map<String, dynamic> json) {
     final category = json['categories'] as Map<String, dynamic>?;

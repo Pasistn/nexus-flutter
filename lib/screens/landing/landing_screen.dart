@@ -9,6 +9,7 @@ import '../../widgets/nexus_logo.dart';
 import '../../widgets/skill_map.dart';
 import '../../widgets/user_avatar.dart';
 import '../auth/auth_screen.dart';
+import '../legal/privacy_policy_screen.dart';
 
 const _germany = LatLng(51.1657, 10.4515);
 
@@ -96,7 +97,21 @@ class _LandingScreenState extends State<LandingScreen> {
                   ),
                   const _Features(),
                   const _Community(),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 24),
+                  Center(
+                    child: TextButton(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const PrivacyPolicyScreen(),
+                        ),
+                      ),
+                      child: const Text(
+                        'Datenschutz',
+                        style: TextStyle(color: kTextMuted, fontSize: 12.5),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                 ],
               ),
             ),

@@ -103,7 +103,9 @@ class ChatProvider extends ChangeNotifier {
     }
 
     final idx = _conversations.indexWhere((c) => c.id == msg.conversationId);
-    if (idx != -1) {
+    if (idx == -1) {
+      _scheduleReload();
+    } else {
       _conversations = [..._conversations]
         ..[idx] = _conversations[idx].withLastMessage(msg.content, msg.createdAt)
         ..sort((a, b) => b.sortKey.compareTo(a.sortKey));
