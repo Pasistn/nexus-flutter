@@ -1,4 +1,15 @@
-create extension if not exists pg_net;
+do $$
+begin
+  if exists (
+    select 1 from pg_extension e
+    join pg_namespace n on n.oid = e.extnamespace
+    where e.extname = 'pg_net' and n.nspname = 'public'
+  ) then
+    drop extension pg_net;
+  end if;
+end $$;
+
+create extension if not exists pg_net with schema extensions;
 
 create or replace function public.notify_push(
   target_ids uuid[],

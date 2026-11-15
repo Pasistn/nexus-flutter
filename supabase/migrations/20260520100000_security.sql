@@ -1,3 +1,5 @@
+drop function if exists public.get_my_conversation_ids();
+
 create or replace function public.is_conversation_member(p_conversation_id uuid)
 returns boolean
 language sql
@@ -775,3 +777,12 @@ create index if not exists conversations_created_by_idx
   on public.conversations (created_by, created_at);
 create index if not exists device_tokens_user_idx
   on public.device_tokens (user_id);
+drop index if exists public.device_tokens_user_id_idx;
+create index if not exists skills_category_idx
+  on public.skills (category_id);
+create index if not exists ratings_skill_idx
+  on public.ratings (skill_id);
+create index if not exists conversations_skill_idx
+  on public.conversations (skill_id);
+create index if not exists skill_reports_reporter_idx
+  on public.skill_reports (reporter_id);
