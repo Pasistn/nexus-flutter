@@ -35,7 +35,19 @@ create table if not exists public.skills (
 
 alter table public.skills add column if not exists skill_type text not null default 'offering';
 alter table public.skills add column if not exists category_id uuid references public.categories (id) on delete set null;
+alter table public.skills add column if not exists user_name text;
+alter table public.skills add column if not exists tags text[] not null default '{}';
+alter table public.skills add column if not exists status text not null default 'active';
+alter table public.skills add column if not exists created_at timestamptz not null default now();
 alter table public.skills drop column if exists points_per_hour;
+
+alter table public.profiles add column if not exists user_name text;
+alter table public.profiles add column if not exists bio text;
+alter table public.profiles add column if not exists avatar_url text;
+alter table public.profiles add column if not exists home_address text;
+alter table public.profiles add column if not exists home_lat double precision;
+alter table public.profiles add column if not exists home_lng double precision;
+alter table public.profiles add column if not exists created_at timestamptz not null default now();
 
 do $$
 begin
@@ -56,6 +68,11 @@ create table if not exists public.ratings (
   created_at    timestamptz not null default now(),
   unique (rater_id, rated_user_id)
 );
+
+alter table public.ratings add column if not exists rater_name text;
+alter table public.ratings add column if not exists skill_id uuid references public.skills (id) on delete set null;
+alter table public.ratings add column if not exists comment text;
+alter table public.ratings add column if not exists created_at timestamptz not null default now();
 
 create table if not exists public.conversations (
   id              uuid primary key default gen_random_uuid(),
@@ -118,6 +135,41 @@ create table if not exists public.device_tokens (
   platform   text not null default 'android',
   updated_at timestamptz not null default now()
 );
+
+with ranked as (
+  select id, first_value(id) over (partition by name order by ctid) as keep_id
+  from public.categories
+)
+update public.skills s
+set category_id = r.keep_id
+from ranked r
+where s.category_id = r.id and r.id <> r.keep_id;
+
+delete from public.categories a
+using public.categories b
+where a.name = b.name and a.ctid > b.ctid;
+
+delete from public.ratings a
+using public.ratings b
+where a.rater_id = b.rater_id and a.rated_user_id = b.rated_user_id and a.ctid < b.ctid;
+
+delete from public.conversation_members a
+using public.conversation_members b
+where a.conversation_id = b.conversation_id and a.user_id = b.user_id and a.ctid > b.ctid;
+
+delete from public.skill_reports a
+using public.skill_reports b
+where a.skill_id = b.skill_id and a.reporter_id = b.reporter_id and a.ctid > b.ctid;
+
+delete from public.device_tokens a
+using public.device_tokens b
+where a.fcm_token = b.fcm_token and a.ctid < b.ctid;
+
+create unique index if not exists categories_name_key on public.categories (name);
+create unique index if not exists ratings_rater_id_rated_user_id_key on public.ratings (rater_id, rated_user_id);
+create unique index if not exists conversation_members_conversation_id_user_id_key on public.conversation_members (conversation_id, user_id);
+create unique index if not exists skill_reports_skill_id_reporter_id_key on public.skill_reports (skill_id, reporter_id);
+create unique index if not exists device_tokens_fcm_token_key on public.device_tokens (fcm_token);
 
 insert into public.categories (name, icon) values
   ('Garten',                '🌿'),
