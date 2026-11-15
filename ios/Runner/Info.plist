@@ -43,23 +43,28 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
-	<!-- Location permissions -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Nexus benötigt deinen Standort, um Skills in deiner Nähe zu zeigen.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Nexus benötigt deinen Standort, um Skills in deiner Nähe zu zeigen.</string>
-	<!-- Camera & Photo Library -->
+	<string>Nexus zeigt dir Skills in deiner Nähe und setzt deinen Standort für neue Einträge. Der Standort wird nur genutzt, wenn die App geöffnet ist.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Um ein Profilbild aufzunehmen.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Um ein Profilbild aus deiner Galerie auszuwählen.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Um dein Profilbild zu speichern.</string>
-	<!-- Network security -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
-		<true/>
+		<false/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>tile.openstreetmap.org</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<false/>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+			</dict>
+		</dict>
 	</dict>
 </dict>
 </plist>
