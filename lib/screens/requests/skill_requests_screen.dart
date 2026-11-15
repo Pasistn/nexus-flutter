@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/date_format.dart';
 import '../../models/skill_request.dart';
 import '../../providers/chat_provider.dart';
-import '../../providers/profile_provider.dart';
 import '../../providers/skill_request_provider.dart';
+import '../../widgets/feedback.dart';
+import '../../widgets/user_avatar.dart';
 import '../chat/chat_screen.dart';
 
 class SkillRequestsScreen extends StatelessWidget {
@@ -12,26 +15,43 @@ class SkillRequestsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<SkillRequestProvider>();
+
     return DefaultTabController(
       length: 2,
       child: Scaffold(
-        backgroundColor: kBgDark,
         appBar: AppBar(
           title: const Text('Anfragen'),
-          bottom: const TabBar(
-            labelColor: kNeonOrange,
+          bottom: TabBar(
+            labelColor: kPrimary,
             unselectedLabelColor: kTextMuted,
-            indicatorColor: kNeonOrange,
+            indicatorColor: kPrimary,
             tabs: [
-              Tab(text: 'Erhalten'),
-              Tab(text: 'Gesendet'),
+              Tab(text: 'Erhalten (${provider.received.length})'),
+              Tab(text: 'Gesendet (${provider.sent.length})'),
             ],
           ),
         ),
-        body: const TabBarView(
+        body: TabBarView(
           children: [
-            _ReceivedTab(),
-            _SentTab(),
+            _RequestList(
+              requests: provider.received,
+              empty: const EmptyState(
+                icon: Icons.inbox_outlined,
+                title: 'Keine Anfragen erhalten',
+                message: 'Sobald jemand einen deiner Skills anfragt, '
+                    'taucht das hier auf.',
+              ),
+              itemBuilder: (r) => _ReceivedCard(request: r),
+            ),
+            _RequestList(
+              requests: provider.sent,
+              empty: const EmptyState(
+                icon: Icons.send_outlined,
+                title: 'Noch nichts angefragt',
+              ),
+              itemBuilder: (r) => _SentCard(request: r),
+            ),
           ],
         ),
       ),
@@ -39,133 +59,90 @@ class SkillRequestsScreen extends StatelessWidget {
   }
 }
 
-class _ReceivedTab extends StatelessWidget {
-  const _ReceivedTab();
+class _RequestList extends StatelessWidget {
+  const _RequestList({
+    required this.requests,
+    required this.empty,
+    required this.itemBuilder,
+  });
+
+  final List<SkillRequest> requests;
+  final Widget empty;
+  final Widget Function(SkillRequest) itemBuilder;
 
   @override
   Widget build(BuildContext context) {
-    final requests = context.watch<SkillRequestProvider>().received;
-    if (requests.isEmpty) {
-      return const _EmptyState(
-        icon: Icons.inbox_outlined,
-        text: 'Keine Anfragen erhalten',
-      );
-    }
-    return ListView.builder(
+    if (requests.isEmpty) return empty;
+    return ListView.separated(
       padding: const EdgeInsets.all(16),
       itemCount: requests.length,
-      itemBuilder: (_, i) => _ReceivedCard(request: requests[i]),
-    );
-  }
-}
-
-class _SentTab extends StatelessWidget {
-  const _SentTab();
-
-  @override
-  Widget build(BuildContext context) {
-    final requests = context.watch<SkillRequestProvider>().sent;
-    if (requests.isEmpty) {
-      return const _EmptyState(
-        icon: Icons.send_outlined,
-        text: 'Keine Anfragen gesendet',
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: requests.length,
-      itemBuilder: (_, i) => _SentCard(request: requests[i]),
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
+      itemBuilder: (_, i) => itemBuilder(requests[i]),
     );
   }
 }
 
 class _ReceivedCard extends StatefulWidget {
-  final SkillRequest request;
   const _ReceivedCard({required this.request});
+
+  final SkillRequest request;
 
   @override
   State<_ReceivedCard> createState() => _ReceivedCardState();
 }
 
 class _ReceivedCardState extends State<_ReceivedCard> {
-  bool _loading = false;
+  bool _busy = false;
 
   Future<void> _accept() async {
-    setState(() => _loading = true);
-    final profile = context.read<ProfileProvider>().profile;
-    final (convId, err) =
-        await context.read<SkillRequestProvider>().acceptRequest(
-              request: widget.request,
-              currentUserName: profile?.userName ?? 'Anonym',
-              currentUserAvatar: profile?.avatarUrl,
-              chatProvider: context.read<ChatProvider>(),
-            );
-
+    setState(() => _busy = true);
+    final chat = context.read<ChatProvider>();
+    final result =
+        await context.read<SkillRequestProvider>().accept(widget.request, chat);
     if (!mounted) return;
-    setState(() => _loading = false);
+    setState(() => _busy = false);
 
-    if (err != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Fehler: $err')));
+    final conv = result.conversationId == null
+        ? null
+        : chat.byId(result.conversationId!);
+    if (conv == null) {
+      showSnack(
+        context,
+        result.error ?? 'Chat konnte nicht geöffnet werden.',
+        error: true,
+      );
       return;
     }
-
-    final conversations = context.read<ChatProvider>().conversations;
-    final conv = conversations.firstWhere((c) => c.id == convId!);
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => ChatScreen(conversation: conv)),
     );
   }
 
   Future<void> _reject() async {
-    setState(() => _loading = true);
-    final err = await context
-        .read<SkillRequestProvider>()
-        .rejectRequest(widget.request.id);
+    setState(() => _busy = true);
+    final err =
+        await context.read<SkillRequestProvider>().reject(widget.request.id);
     if (!mounted) return;
-    setState(() => _loading = false);
-    if (err != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Fehler: $err')));
-    }
+    setState(() => _busy = false);
+    if (err != null) showSnack(context, err, error: true);
   }
 
   @override
   Widget build(BuildContext context) {
     final req = widget.request;
-    final isPending = req.status == 'pending';
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: kBgCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isPending
-              ? kNeonOrange.withOpacity(0.3)
-              : kBorderColor,
-        ),
-      ),
+    final message = req.message;
+
+    return _Card(
+      highlighted: req.isPending,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              CircleAvatar(
+              UserAvatar(
+                url: req.requesterAvatar,
+                name: req.requesterName,
                 radius: 22,
-                backgroundColor: kBgCardElevated,
-                backgroundImage: req.requesterAvatar != null
-                    ? NetworkImage(req.requesterAvatar!)
-                    : null,
-                child: req.requesterAvatar == null
-                    ? Text(
-                        (req.requesterName ?? '?')
-                            .substring(0, 1)
-                            .toUpperCase(),
-                        style: const TextStyle(
-                            color: kNeonOrange,
-                            fontWeight: FontWeight.w700))
-                    : null,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -175,75 +152,65 @@ class _ReceivedCardState extends State<_ReceivedCard> {
                     Text(
                       req.requesterName ?? 'Anonym',
                       style: const TextStyle(
-                          color: kTextPrimary,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 15),
-                    ),
-                    if (req.skillTitle != null)
-                      Text(
-                        'Möchte: ${req.skillTitle}',
-                        style: const TextStyle(
-                            color: kTextSecondary, fontSize: 12),
+                        color: kTextPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
                       ),
+                    ),
+                    Text(
+                      'möchte: ${req.skillTitle ?? 'deinen Skill'}',
+                      style: const TextStyle(color: kTextSecondary, fontSize: 12),
+                    ),
                   ],
                 ),
               ),
-              _StatusBadge(status: req.status),
+              _StatusBadge(req.status),
             ],
           ),
-          if (req.message != null && req.message!.isNotEmpty) ...[
+          if (message != null && message.isNotEmpty) ...[
             const SizedBox(height: 12),
             Container(
+              width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: kBgCardElevated,
+                color: kSurfaceAlt,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
-                '"${req.message}"',
+                '„$message“',
                 style: const TextStyle(
-                    color: kTextSecondary,
-                    fontSize: 13,
-                    fontStyle: FontStyle.italic),
+                  color: kTextSecondary,
+                  fontSize: 13,
+                  fontStyle: FontStyle.italic,
+                ),
               ),
             ),
           ],
-          if (isPending) ...[
+          if (req.isPending) ...[
             const SizedBox(height: 14),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: _loading ? null : _reject,
+                    onPressed: _busy ? null : _reject,
                     style: OutlinedButton.styleFrom(
                       foregroundColor: kError,
-                      side: BorderSide(
-                          color: kError.withOpacity(0.5), width: 1.5),
+                      side: BorderSide(color: kError.withValues(alpha: 0.5)),
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
-                    child: _loading
-                        ? const SizedBox(
-                            height: 18,
-                            width: 18,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: kError))
-                        : const Text('Ablehnen'),
+                    child: const Text('Ablehnen'),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: _loading ? null : _accept,
+                    onPressed: _busy ? null : _accept,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
-                    child: _loading
-                        ? const SizedBox(
-                            height: 18,
-                            width: 18,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white))
-                        : const Text('Annehmen & Chatten'),
+                    child: _busy
+                        ? const ButtonSpinner()
+                        : const Text('Annehmen & chatten'),
                   ),
                 ),
               ],
@@ -256,29 +223,19 @@ class _ReceivedCardState extends State<_ReceivedCard> {
 }
 
 class _SentCard extends StatelessWidget {
-  final SkillRequest request;
   const _SentCard({required this.request});
+
+  final SkillRequest request;
 
   @override
   Widget build(BuildContext context) {
-    final req = request;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: kBgCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: kBorderColor),
-      ),
+    return _Card(
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: kNeonOrange.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.bolt, color: kNeonOrange, size: 22),
+          CircleAvatar(
+            radius: 22,
+            backgroundColor: kPrimary.withValues(alpha: 0.1),
+            child: const Icon(Icons.bolt, color: kPrimary, size: 22),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -286,86 +243,71 @@ class _SentCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  req.skillTitle ?? 'Skill',
+                  request.skillTitle ?? 'Skill',
                   style: const TextStyle(
-                      color: kTextPrimary,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 15),
+                    color: kTextPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
                 ),
                 Text(
-                  _formatDate(req.createdAt),
-                  style: const TextStyle(
-                      color: kTextMuted, fontSize: 11),
+                  formatDate(request.createdAt),
+                  style: const TextStyle(color: kTextMuted, fontSize: 11),
                 ),
               ],
             ),
           ),
-          _StatusBadge(status: req.status),
+          _StatusBadge(request.status),
         ],
       ),
     );
   }
+}
 
-  String _formatDate(DateTime dt) {
-    final local = dt.toLocal();
-    return '${local.day}.${local.month}.${local.year}';
+class _Card extends StatelessWidget {
+  const _Card({required this.child, this.highlighted = false});
+
+  final Widget child;
+  final bool highlighted;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: kSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: highlighted ? kPrimary.withValues(alpha: 0.3) : kBorder,
+        ),
+      ),
+      child: child,
+    );
   }
 }
 
 class _StatusBadge extends StatelessWidget {
-  final String status;
-  const _StatusBadge({required this.status});
+  const _StatusBadge(this.status);
+
+  final RequestStatus status;
 
   @override
   Widget build(BuildContext context) {
-    Color color;
-    String label;
-    switch (status) {
-      case 'accepted':
-        color = kSuccess;
-        label = 'Angenommen';
-        break;
-      case 'rejected':
-        color = kError;
-        label = 'Abgelehnt';
-        break;
-      default:
-        color = kNeonOrange;
-        label = 'Ausstehend';
-    }
+    final (color, label) = switch (status) {
+      RequestStatus.accepted => (kSuccess, 'Angenommen'),
+      RequestStatus.rejected => (kError, 'Abgelehnt'),
+      RequestStatus.pending => (kPrimary, 'Offen'),
+    };
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Text(
         label,
-        style: TextStyle(
-            color: color, fontSize: 11, fontWeight: FontWeight.w600),
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  const _EmptyState({required this.icon, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: kTextMuted, size: 48),
-          const SizedBox(height: 12),
-          Text(text,
-              style:
-                  const TextStyle(color: kTextSecondary, fontSize: 14)),
-        ],
+        style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600),
       ),
     );
   }

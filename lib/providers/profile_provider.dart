@@ -1,11 +1,24 @@
-import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../core/constants/supabase_constants.dart';
+
+import '../core/config/tables.dart';
+import '../core/utils/error_utils.dart';
 import '../models/profile.dart';
 
 class ProfileProvider extends ChangeNotifier {
   final _client = Supabase.instance.client;
+
+  static const maxNameLength = 50;
+  static const maxBioLength = 500;
+  static const maxAddressLength = 300;
+  static const _maxAvatarBytes = 2 * 1024 * 1024;
+  static const _imageTypes = {
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'webp': 'image/webp',
+  };
 
   Profile? _profile;
   bool _loading = false;
@@ -15,71 +28,101 @@ class ProfileProvider extends ChangeNotifier {
   bool get loading => _loading;
   String? get error => _error;
 
-  Future<void> loadProfile(String userId) async {
+  Future<void> load(String userId) async {
     _loading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final data = await _client
-          .from(SupabaseConstants.profilesTable)
+      final row = await _client
+          .from(Tables.profiles)
           .select()
           .eq('id', userId)
           .maybeSingle();
-
-      _profile = data != null ? _normalizeProfile(data) : null;
+      _profile = row == null ? Profile(id: userId) : Profile.fromJson(row);
     } catch (e) {
-      _error = e.toString();
+      _error = friendlyError(e);
     } finally {
       _loading = false;
       notifyListeners();
     }
   }
 
-  Profile _normalizeProfile(Map<String, dynamic> data) {
-    final profile = Profile.fromJson(data);
-    final raw = data['avatar_url'] as String?;
-    if (raw == null || raw.startsWith('http')) return profile;
-    final fullUrl = _client.storage
-        .from(SupabaseConstants.avatarsBucket)
-        .getPublicUrl(raw);
-    return profile.copyWith(avatarUrl: fullUrl);
+  Future<String?> save(Profile draft, {XFile? avatar}) async {
+    if ((draft.userName?.length ?? 0) > maxNameLength) {
+      return 'Der Name darf höchstens $maxNameLength Zeichen lang sein.';
+    }
+    if ((draft.bio?.length ?? 0) > maxBioLength) {
+      return 'Die Bio darf höchstens $maxBioLength Zeichen lang sein.';
+    }
+
+    var next = draft;
+    if (avatar != null) {
+      final (path, err) = await _uploadAvatar(draft.id, avatar);
+      if (err != null) return err;
+      next = Profile(
+        id: draft.id,
+        userName: draft.userName,
+        bio: draft.bio,
+        avatarUrl: path,
+        homeAddress: draft.homeAddress,
+        homeLat: draft.homeLat,
+        homeLng: draft.homeLng,
+      );
+    }
+
+    try {
+      await _client.from(Tables.profiles).upsert(next.toJson());
+    } catch (e) {
+      return friendlyError(e);
+    }
+
+    _profile = next;
+    notifyListeners();
+    if (avatar != null) _pruneOldAvatars(next.id, keep: next.avatarUrl!);
+    return null;
   }
 
-  Future<String?> upsertProfile(Profile profile) async {
+  Future<(String?, String?)> _uploadAvatar(String userId, XFile file) async {
+    final ext = file.name.split('.').last.toLowerCase();
+    final contentType = _imageTypes[ext];
+    if (contentType == null) {
+      return (null, 'Bitte wähle ein JPG-, PNG- oder WebP-Bild.');
+    }
+
     try {
-      await _client
-          .from(SupabaseConstants.profilesTable)
-          .upsert(profile.toJson());
-      _profile = profile;
-      notifyListeners();
-      return null;
+      final bytes = await file.readAsBytes();
+      if (bytes.length > _maxAvatarBytes) {
+        return (null, 'Das Bild ist zu groß (max. 2 MB).');
+      }
+
+      final path = '$userId/${DateTime.now().millisecondsSinceEpoch}.$ext';
+      await _client.storage.from(Buckets.avatars).uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(contentType: contentType),
+          );
+      return (path, null);
     } catch (e) {
-      return e.toString();
+      return (null, friendlyError(e));
     }
   }
 
-  Future<String?> uploadAvatar(String userId, File file) async {
+  Future<void> _pruneOldAvatars(String userId, {required String keep}) async {
     try {
-      final ext = file.path.split('.').last;
-      final path = '$userId/avatar.$ext';
-
-      await _client.storage
-          .from(SupabaseConstants.avatarsBucket)
-          .upload(path, file, fileOptions: const FileOptions(upsert: true));
-
-      final url = _client.storage
-          .from(SupabaseConstants.avatarsBucket)
-          .getPublicUrl(path);
-
-      return url;
-    } catch (e) {
-      return null;
-    }
+      final bucket = _client.storage.from(Buckets.avatars);
+      final files = await bucket.list(path: userId);
+      final stale = [
+        for (final f in files)
+          if ('$userId/${f.name}' != keep) '$userId/${f.name}',
+      ];
+      if (stale.isNotEmpty) await bucket.remove(stale);
+    } catch (_) {}
   }
 
   void clear() {
     _profile = null;
+    _error = null;
     notifyListeners();
   }
 }

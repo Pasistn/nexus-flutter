@@ -1,87 +1,99 @@
 import 'package:flutter/material.dart';
 
-// Primary brand color - Blue
-const kNeonOrange = Color(0xFF2563EB);
-const kNeonOrangeLight = Color(0xFF3B82F6);
-const kNeonOrangeDark = Color(0xFF1D4ED8);
+const kPrimary = Color(0xFF2563EB);
+const kPrimaryLight = Color(0xFF3B82F6);
 
-// Backgrounds - Light mode
-const kBgDark = Color(0xFFFFFFFF);
-const kBgCard = Color(0xFFF9FAFB);
-const kBgCardElevated = Color(0xFFF3F4F6);
-const kBorderColor = Color(0xFFE5E7EB);
+const kBackground = Color(0xFFFFFFFF);
+const kBackdrop = Color(0xFFF1F5F9);
+const kSurface = Color(0xFFF9FAFB);
+const kSurfaceAlt = Color(0xFFF3F4F6);
+const kBorder = Color(0xFFE5E7EB);
 
-// Text colors - Dark on light
 const kTextPrimary = Color(0xFF111827);
 const kTextSecondary = Color(0xFF6B7280);
 const kTextMuted = Color(0xFF9CA3AF);
 
-// Status colors
 const kSuccess = Color(0xFF22C55E);
 const kError = Color(0xFFEF4444);
 
+const kFontFamily = 'Poppins';
+
 ThemeData buildNexusTheme() {
+  final radius12 = BorderRadius.circular(12);
+
+  OutlineInputBorder inputBorder(Color color, [double width = 1]) =>
+      OutlineInputBorder(
+        borderRadius: radius12,
+        borderSide: BorderSide(color: color, width: width),
+      );
+
   return ThemeData(
     useMaterial3: true,
-    brightness: Brightness.light,
-    scaffoldBackgroundColor: kBgDark,
+    fontFamily: kFontFamily,
+    scaffoldBackgroundColor: kBackground,
     colorScheme: const ColorScheme.light(
-      primary: kNeonOrange,
-      secondary: kNeonOrangeLight,
-      surface: kBgCard,
+      primary: kPrimary,
+      secondary: kPrimaryLight,
+      surface: kSurface,
       error: kError,
-      onPrimary: Colors.white,
-      onSecondary: Colors.white,
       onSurface: kTextPrimary,
-      onError: Colors.white,
     ),
     cardTheme: CardThemeData(
-      color: kBgCard,
+      color: kSurface,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: kBorderColor, width: 1),
+        side: const BorderSide(color: kBorder),
       ),
     ),
     appBarTheme: const AppBarTheme(
-      backgroundColor: kBgDark,
+      backgroundColor: kBackground,
+      surfaceTintColor: Colors.transparent,
       elevation: 0,
       centerTitle: false,
       iconTheme: IconThemeData(color: kTextPrimary),
       titleTextStyle: TextStyle(
+        fontFamily: kFontFamily,
         color: kTextPrimary,
-        fontSize: 20,
+        fontSize: 19,
         fontWeight: FontWeight.w700,
-        letterSpacing: -0.5,
+        letterSpacing: -0.4,
       ),
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
-        backgroundColor: kNeonOrange,
+        backgroundColor: kPrimary,
         foregroundColor: Colors.white,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: radius12),
         textStyle: const TextStyle(
+          fontFamily: kFontFamily,
           fontWeight: FontWeight.w700,
           fontSize: 15,
-          letterSpacing: 0.3,
         ),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        foregroundColor: kNeonOrange,
-        side: const BorderSide(color: kNeonOrange, width: 1.5),
+        foregroundColor: kPrimary,
+        side: const BorderSide(color: kPrimary, width: 1.5),
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+        shape: RoundedRectangleBorder(borderRadius: radius12),
+        textStyle: const TextStyle(
+          fontFamily: kFontFamily,
+          fontWeight: FontWeight.w600,
+          fontSize: 15,
+        ),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: kNeonOrange,
-        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+        foregroundColor: kPrimary,
+        textStyle: const TextStyle(
+          fontFamily: kFontFamily,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
@@ -89,61 +101,40 @@ ThemeData buildNexusTheme() {
       fillColor: Colors.white,
       hintStyle: const TextStyle(color: kTextMuted, fontSize: 14),
       labelStyle: const TextStyle(color: kTextSecondary),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: kBorderColor),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: kBorderColor),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFFD1D5DB), width: 1.5),
-      ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: kError),
-      ),
+      border: inputBorder(kBorder),
+      enabledBorder: inputBorder(kBorder),
+      focusedBorder: inputBorder(const Color(0xFFD1D5DB), 1.5),
+      errorBorder: inputBorder(kError),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     ),
     sliderTheme: const SliderThemeData(
-      activeTrackColor: kNeonOrange,
-      thumbColor: kNeonOrange,
-      inactiveTrackColor: kBorderColor,
+      activeTrackColor: kPrimary,
+      thumbColor: kPrimary,
+      inactiveTrackColor: kBorder,
       overlayColor: Color(0x292563EB),
     ),
-    dividerTheme: const DividerThemeData(color: kBorderColor, thickness: 1),
+    dividerTheme: const DividerThemeData(color: kBorder, thickness: 1),
     textTheme: const TextTheme(
-      displayLarge: TextStyle(
-          color: kTextPrimary, fontWeight: FontWeight.w900, fontSize: 48),
       displayMedium: TextStyle(
-          color: kTextPrimary, fontWeight: FontWeight.w800, fontSize: 36),
-      headlineLarge: TextStyle(
-          color: kTextPrimary, fontWeight: FontWeight.w700, fontSize: 28),
-      headlineMedium: TextStyle(
-          color: kTextPrimary, fontWeight: FontWeight.w700, fontSize: 22),
+          color: kTextPrimary, fontWeight: FontWeight.w800, fontSize: 32),
       headlineSmall: TextStyle(
-          color: kTextPrimary, fontWeight: FontWeight.w600, fontSize: 18),
-      titleLarge: TextStyle(
-          color: kTextPrimary, fontWeight: FontWeight.w600, fontSize: 16),
+          color: kTextPrimary, fontWeight: FontWeight.w700, fontSize: 18),
       titleMedium: TextStyle(
-          color: kTextPrimary, fontWeight: FontWeight.w500, fontSize: 14),
-      bodyLarge: TextStyle(color: kTextPrimary, fontSize: 16),
+          color: kTextPrimary, fontWeight: FontWeight.w600, fontSize: 15),
+      bodyLarge: TextStyle(color: kTextPrimary, fontSize: 15),
       bodyMedium: TextStyle(color: kTextSecondary, fontSize: 14),
       bodySmall: TextStyle(color: kTextMuted, fontSize: 12),
-      labelLarge: TextStyle(
-          color: kNeonOrange, fontWeight: FontWeight.w700, fontSize: 13),
     ),
     chipTheme: ChipThemeData(
-      backgroundColor: kBgCardElevated,
-      labelStyle: const TextStyle(color: kTextSecondary, fontSize: 12),
-      side: const BorderSide(color: kBorderColor),
+      backgroundColor: kSurfaceAlt,
+      labelStyle: const TextStyle(color: kTextPrimary, fontSize: 12),
+      side: const BorderSide(color: kBorder),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
     ),
+    snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
     bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-      backgroundColor: kBgDark,
-      selectedItemColor: kNeonOrange,
+      backgroundColor: kSurface,
+      selectedItemColor: kPrimary,
       unselectedItemColor: kTextMuted,
       elevation: 0,
       type: BottomNavigationBarType.fixed,

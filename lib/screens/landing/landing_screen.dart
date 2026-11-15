@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
+
+import '../../core/theme/app_theme.dart';
 import '../../models/skill.dart';
 import '../../providers/skills_provider.dart';
+import '../../widgets/nexus_logo.dart';
+import '../../widgets/skill_map.dart';
+import '../../widgets/user_avatar.dart';
 import '../auth/auth_screen.dart';
+
+const _germany = LatLng(51.1657, 10.4515);
 
 class LandingScreen extends StatefulWidget {
   const LandingScreen({super.key});
@@ -15,57 +20,84 @@ class LandingScreen extends StatefulWidget {
 }
 
 class _LandingScreenState extends State<LandingScreen> {
-  static const _kBlue = Color(0xFF2563EB);
-  static const _kDark = Color(0xFF111827);
-  static const _kGray = Color(0xFF6B7280);
-  static const _kBorder = Color(0xFFE5E7EB);
-  static const _kGreen = Color(0xFF22C55E);
-  static const _kBg = Color(0xFFF1F5F9);
-
-  final _searchController = TextEditingController();
-  Skill? _selectedSkill;
+  final _search = TextEditingController();
+  Skill? _selected;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<SkillsProvider>().loadSkills();
+      final skills = context.read<SkillsProvider>();
+      _search.text = skills.query;
+      skills.load();
     });
   }
 
   @override
   void dispose() {
-    _searchController.dispose();
+    _search.dispose();
     super.dispose();
+  }
+
+  void _openAuth({bool register = false}) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AuthScreen(startWithRegister: register),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final skillsProv = context.watch<SkillsProvider>();
-    final skills = skillsProv.query.isNotEmpty
-        ? skillsProv.filteredSkills()
-        : skillsProv.allSkills;
+    final provider = context.watch<SkillsProvider>();
+    final skills = provider.filtered(ignoreType: true);
 
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: kBackdrop,
       body: SafeArea(
         child: Column(
           children: [
-            _buildNavBar(),
+            _NavBar(onJoin: () => _openAuth(register: true)),
             Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildHero(),
-                    _buildSearchCard(skillsProv),
-                    const SizedBox(height: 16),
-                    _buildMap(skills),
-                    _buildFeatures(),
-                    _buildWallOfLove(),
-                    const SizedBox(height: 32),
-                  ],
-                ),
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  const _Hero(),
+                  _SearchBar(controller: _search, onChanged: provider.setQuery),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 340,
+                    child: Stack(
+                      children: [
+                        SkillMap(
+                          skills: skills,
+                          initialCenter: _germany,
+                          initialZoom: 5.5,
+                          onSkillTap: (s) => setState(() => _selected = s),
+                        ),
+                        Positioned(
+                          right: 10,
+                          top: 10,
+                          child: _LiveCounter(count: skills.length),
+                        ),
+                        if (_selected != null)
+                          Positioned(
+                            left: 12,
+                            right: 12,
+                            bottom: 12,
+                            child: _PreviewCard(
+                              skill: _selected!,
+                              onClose: () => setState(() => _selected = null),
+                              onContact: _openAuth,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const _Features(),
+                  const _Community(),
+                  const SizedBox(height: 32),
+                ],
               ),
             ),
           ],
@@ -73,128 +105,122 @@ class _LandingScreenState extends State<LandingScreen> {
       ),
     );
   }
+}
 
-  Widget _buildNavBar() {
+class _NavBar extends StatelessWidget {
+  const _NavBar({required this.onJoin});
+
+  final VoidCallback onJoin;
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(bottom: BorderSide(color: _kBorder)),
+        border: Border(bottom: BorderSide(color: kBorder)),
       ),
       child: Row(
         children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: const BoxDecoration(
-                  color: _kGreen,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'NEXUS',
-                style: GoogleFonts.poppins(
-                  color: _kBlue,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 18,
-                  letterSpacing: 1.5,
-                ),
-              ),
-            ],
+          const NexusLogo(size: 38),
+          const SizedBox(width: 10),
+          const Text(
+            'NEXUS',
+            style: TextStyle(
+              color: kPrimary,
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+              letterSpacing: 1.5,
+            ),
           ),
           const Spacer(),
-          GestureDetector(
-            onTap: () => _openAuth(context),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: _kDark,
+          FilledButton(
+            onPressed: onJoin,
+            style: FilledButton.styleFrom(
+              backgroundColor: kTextPrimary,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Text(
-                'NEXUS BEITRETEN',
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
-                  letterSpacing: 0.5,
-                ),
+              textStyle: const TextStyle(
+                fontFamily: kFontFamily,
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+                letterSpacing: 0.5,
               ),
             ),
+            child: const Text('MITMACHEN'),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildHero() {
+class _Hero extends StatelessWidget {
+  const _Hero();
+
+  @override
+  Widget build(BuildContext context) {
+    const headline = TextStyle(
+      fontSize: 34,
+      fontWeight: FontWeight.w800,
+      fontStyle: FontStyle.italic,
+      height: 1.1,
+      letterSpacing: -0.5,
+    );
+
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+      child: const Column(
         children: [
-          RichText(
-            textAlign: TextAlign.center,
-            text: TextSpan(
+          Text.rich(
+            TextSpan(
               children: [
                 TextSpan(
                   text: 'TAUSCHE SKILLS.\n',
-                  style: GoogleFonts.poppins(
-                    color: _kDark,
-                    fontSize: 36,
-                    fontWeight: FontWeight.w900,
-                    fontStyle: FontStyle.italic,
-                    height: 1.1,
-                    letterSpacing: -0.5,
-                  ),
+                  style: TextStyle(color: kTextPrimary),
                 ),
-                TextSpan(
-                  text: 'NICHT GELD.',
-                  style: GoogleFonts.poppins(
-                    color: _kBlue,
-                    fontSize: 36,
-                    fontWeight: FontWeight.w900,
-                    fontStyle: FontStyle.italic,
-                    height: 1.1,
-                    letterSpacing: -0.5,
-                  ),
-                ),
+                TextSpan(text: 'NICHT GELD.', style: TextStyle(color: kPrimary)),
               ],
             ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Willkommen im Live-Radar für nachbarschaftliche Hilfe. Finde Experten in deiner Nähe, lerne Neues und biete deine eigenen Fähigkeiten im Tausch an.',
             textAlign: TextAlign.center,
-            style: GoogleFonts.poppins(
-              color: _kGray,
-              fontSize: 13,
-              height: 1.6,
-            ),
+            style: headline,
+          ),
+          SizedBox(height: 12),
+          Text(
+            'Das Live-Radar für Nachbarschaftshilfe: Finde Leute in deiner Nähe, '
+            'lerne etwas Neues und biete im Gegenzug an, was du selbst kannst.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: kTextSecondary, fontSize: 13, height: 1.6),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildSearchCard(SkillsProvider skillsProv) {
+class _SearchBar extends StatelessWidget {
+  const _SearchBar({required this.controller, required this.onChanged});
+
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: _kBorder),
+          border: Border.all(color: kBorder),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.06),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 12,
               offset: const Offset(0, 4),
             ),
@@ -202,413 +228,298 @@ class _LandingScreenState extends State<LandingScreen> {
         ),
         child: Row(
           children: [
-            const Icon(Icons.search, color: Color(0xFF9CA3AF), size: 19),
+            const Icon(Icons.search, color: kTextMuted, size: 19),
             const SizedBox(width: 8),
             Expanded(
               child: TextField(
-                controller: _searchController,
-                onChanged: skillsProv.setQuery,
-                decoration: InputDecoration(
-                  hintText: 'Suche Skills, z.B. Gitarre...',
-                  hintStyle: GoogleFonts.poppins(
-                      color: const Color(0xFF9CA3AF), fontSize: 13),
+                controller: controller,
+                onChanged: onChanged,
+                maxLength: 100,
+                style: const TextStyle(color: kTextPrimary, fontSize: 13),
+                decoration: const InputDecoration(
+                  counterText: '',
+                  hintText: 'Suche Skills, z. B. Gitarre …',
                   border: InputBorder.none,
-                  isDense: true,
-                  contentPadding: EdgeInsets.zero,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
                   filled: false,
+                  isDense: true,
                 ),
-                style: GoogleFonts.poppins(color: _kDark, fontSize: 13),
               ),
             ),
-            Container(width: 1, height: 20, color: _kBorder),
-            const SizedBox(width: 10),
-            const Icon(Icons.location_on_outlined,
-                color: Color(0xFF9CA3AF), size: 17),
+            const Icon(Icons.location_on_outlined, color: kTextMuted, size: 17),
             const SizedBox(width: 4),
-            Text(
+            const Text(
               'Deutschland',
-              style: GoogleFonts.poppins(color: _kGray, fontSize: 12),
-            ),
-            const SizedBox(width: 10),
-            GestureDetector(
-              onTap: () => skillsProv.setQuery(_searchController.text),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: _kBlue,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  'Los',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
+              style: TextStyle(color: kTextSecondary, fontSize: 12),
             ),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildMap(List<Skill> skills) {
-    return SizedBox(
-      height: 340,
-      child: Stack(
+class _LiveCounter extends StatelessWidget {
+  const _LiveCounter({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 8),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          FlutterMap(
-            options: const MapOptions(
-              initialCenter: LatLng(51.1657, 10.4515),
-              initialZoom: 6,
-            ),
-            children: [
-              TileLayer(
-                urlTemplate:
-                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.nexus.app',
-              ),
-              MarkerLayer(markers: _buildMarkers(skills)),
-            ],
-          ),
-          Positioned(
-            bottom: 10,
-            right: 10,
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 8,
-                  ),
-                ],
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: const BoxDecoration(
-                      color: _kGreen,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    '${skills.length} SKILLS GELADEN',
-                    style: GoogleFonts.poppins(
-                      color: _kDark,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
+          Container(
+            width: 8,
+            height: 8,
+            decoration: const BoxDecoration(
+              color: kSuccess,
+              shape: BoxShape.circle,
             ),
           ),
-          if (_selectedSkill != null) _buildSkillPopup(_selectedSkill!),
+          const SizedBox(width: 6),
+          Text(
+            '$count Skills live',
+            style: const TextStyle(
+              color: kTextPrimary,
+              fontWeight: FontWeight.w600,
+              fontSize: 11,
+            ),
+          ),
         ],
       ),
     );
   }
+}
 
-  List<Marker> _buildMarkers(List<Skill> skills) {
-    return skills
-        .map((skill) => Marker(
-              point: LatLng(skill.lat, skill.lng),
-              width: 36,
-              height: 36,
-              child: GestureDetector(
-                onTap: () => setState(() => _selectedSkill = skill),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: _kBlue,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: _kBlue.withOpacity(0.4),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
+class _PreviewCard extends StatelessWidget {
+  const _PreviewCard({
+    required this.skill,
+    required this.onClose,
+    required this.onContact,
+  });
+
+  final Skill skill;
+  final VoidCallback onClose;
+  final VoidCallback onContact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              UserAvatar(url: skill.avatarUrl, name: skill.userName, radius: 18),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      skill.title,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: kTextPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
                       ),
-                    ],
-                  ),
-                  child: const Icon(Icons.bolt, color: Colors.white, size: 18),
+                    ),
+                    Text(
+                      skill.userName ?? '',
+                      style: const TextStyle(color: kTextSecondary, fontSize: 11),
+                    ),
+                  ],
                 ),
               ),
-            ))
-        .toList();
+              IconButton(
+                onPressed: onClose,
+                icon: const Icon(Icons.close, color: kTextMuted, size: 18),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            skill.description,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: kTextSecondary, fontSize: 12, height: 1.4),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: onContact,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+              child: const Text('Anmelden zum Kontaktieren'),
+            ),
+          ),
+        ],
+      ),
+    );
   }
+}
 
-  Widget _buildFeatures() {
-    final features = [
-      (
-        '📍',
-        const Color(0xFFEDE9FE),
-        'LOKAL & LIVE',
-        'Finde Menschen in deinem direkten Umkreis. Der Radar zeigt dir in Echtzeit an, wer gerade aktiv ist.',
-      ),
-      (
-        '🛡️',
-        const Color(0xFFDBEAFE),
-        'SICHERE BASIS',
-        'Verifizierte Profile und echte Bewertungen. Du entscheidest, wem du deine Skills anbietest.',
-      ),
-    ];
+class _Features extends StatelessWidget {
+  const _Features();
 
+  static const _items = [
+    (
+      Icons.radar_rounded,
+      Color(0xFFEDE9FE),
+      'LOKAL & LIVE',
+      'Der Radar zeigt dir in Echtzeit, wer in deiner Umgebung etwas anbietet oder sucht.',
+    ),
+    (
+      Icons.verified_user_outlined,
+      Color(0xFFDBEAFE),
+      'FAIR & SICHER',
+      'Echte Bewertungen nach jedem Tausch. Du entscheidest, wen du triffst.',
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(20, 32, 20, 32),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: features
-            .map((f) => Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Column(
-                      children: [
-                        Container(
-                          width: 56,
-                          height: 56,
-                          decoration: BoxDecoration(
-                            color: f.$2,
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Center(
-                            child: Text(f.$1,
-                                style: const TextStyle(fontSize: 26)),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          f.$3,
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.poppins(
-                            color: _kDark,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 12,
-                            letterSpacing: 0.3,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          f.$4,
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.poppins(
-                            color: _kGray,
-                            fontSize: 11,
-                            height: 1.55,
-                          ),
-                        ),
-                      ],
+        children: [
+          for (final (icon, bg, title, text) in _items)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Column(
+                  children: [
+                    Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: bg,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(icon, color: kPrimary, size: 26),
                     ),
-                  ),
-                ))
-            .toList(),
+                    const SizedBox(height: 12),
+                    Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: kTextPrimary,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      text,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: kTextSecondary,
+                        fontSize: 11,
+                        height: 1.55,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
+}
 
-  Widget _buildWallOfLove() {
-    final testimonials = [
-      (
-        '"Hab jemanden gefunden, der mein Fahrrad repariert hat. Dafür hab ich ihm eine Stunde Spanisch beigebracht. Geniales Konzept!"',
-        'SARAH L., BERLIN',
-      ),
-      (
-        '"Der Radar ist super flüssig. Ich biete PC-Hilfe an und habe schon mein halbes Wohnzimmer tapeziert bekommen im Tausch."',
-        'THOMAS K., MÜNCHEN',
-      ),
-    ];
+class _Community extends StatelessWidget {
+  const _Community();
 
-    return Container(
-      color: _kBg,
-      padding: const EdgeInsets.fromLTRB(20, 32, 20, 12),
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 32, 20, 0),
       child: Column(
         children: [
-          Text(
-            'WALL OF LOVE',
-            style: GoogleFonts.poppins(
-              color: const Color(0xFFCBD5E1),
+          const Text(
+            'COMMUNITY',
+            style: TextStyle(
+              color: Color(0xFFCBD5E1),
               fontWeight: FontWeight.w800,
               fontSize: 14,
               letterSpacing: 3,
             ),
           ),
           const SizedBox(height: 20),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: testimonials
-                .map((t) => Expanded(
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 6),
-                        padding: const EdgeInsets.all(18),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
-                              blurRadius: 12,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: List.generate(
-                                5,
-                                (_) => const Text('★',
-                                    style: TextStyle(
-                                        color: Color(0xFFF59E0B),
-                                        fontSize: 14)),
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              t.$1,
-                              style: GoogleFonts.poppins(
-                                color: _kDark,
-                                fontSize: 12,
-                                fontStyle: FontStyle.italic,
-                                fontWeight: FontWeight.w600,
-                                height: 1.6,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              '— ${t.$2}',
-                              style: GoogleFonts.poppins(
-                                color: const Color(0xFF94A3B8),
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.8,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ))
-                .toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSkillPopup(Skill skill) {
-    return Positioned(
-      bottom: 12,
-      left: 12,
-      right: 12,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _kBorder),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.12),
-              blurRadius: 20,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor: _kBlue.withOpacity(0.1),
-                  backgroundImage: skill.avatarUrl != null
-                      ? NetworkImage(skill.avatarUrl!)
-                      : null,
-                  child: skill.avatarUrl == null
-                      ? Text(
-                          skill.userName?.substring(0, 1).toUpperCase() ?? '?',
-                          style: GoogleFonts.poppins(
-                              color: _kBlue, fontWeight: FontWeight.w700))
-                      : null,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        skill.skillTitle,
-                        style: GoogleFonts.poppins(
-                            color: _kDark,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14),
-                      ),
-                      Text(
-                        skill.userName ?? '',
-                        style: GoogleFonts.poppins(
-                            color: _kGray, fontSize: 11),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: () => setState(() => _selectedSkill = null),
-                  child: const Icon(Icons.close,
-                      color: Color(0xFF9CA3AF), size: 17),
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 12,
+                  offset: const Offset(0, 2),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            Text(
-              skill.description,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style:
-                  GoogleFonts.poppins(color: _kGray, fontSize: 12, height: 1.4),
-            ),
-            const SizedBox(height: 10),
-            GestureDetector(
-              onTap: () => _openAuth(context),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 9),
-                decoration: BoxDecoration(
-                  color: _kBlue,
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: Text(
-                  'Anmelden zum Kontaktieren',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
+            child: const Column(
+              children: [
+                Text('🌱', style: TextStyle(fontSize: 36)),
+                SizedBox(height: 12),
+                Text(
+                  'Sei einer der Ersten!',
+                  style: TextStyle(
+                    color: kTextPrimary,
+                    fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    fontSize: 12,
                   ),
                 ),
-              ),
+                SizedBox(height: 8),
+                Text(
+                  'Nexus wächst gerade. Registrier dich und hilf mit, eine '
+                  'Nachbarschaft aufzubauen, in der Wissen geteilt wird.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 13,
+                    height: 1.6,
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
-    );
-  }
-
-  void _openAuth(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const AuthScreen()),
     );
   }
 }

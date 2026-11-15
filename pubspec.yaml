@@ -1,55 +1,64 @@
 name: nexus_flutter
-description: Nexus – Skill Exchange Platform
+description: Nexus – lokale Skill-Tauschbörse mit Live-Radar, Chat und Bewertungen.
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
-  sdk: '>=3.3.0 <4.0.0'
+  sdk: ^3.8.0
+  flutter: '>=3.32.0'
 
 dependencies:
   flutter:
     sdk: flutter
 
-  # Supabase
-  supabase_flutter: ^2.5.6
-
-  # Map
-  flutter_map: ^7.0.2
-  latlong2: ^0.9.1
-
-  # State management
+  supabase_flutter: ^2.18.0
   provider: ^6.1.2
 
-  # Location
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
   geolocator: ^12.0.0
-
-  # Image picker (avatar upload)
-  image_picker: ^1.1.2
-
-  # Networking
   http: ^1.2.1
 
-  # Cached images
+  image_picker: ^1.1.2
   cached_network_image: ^3.3.1
 
-  # Fonts
-  google_fonts: ^6.2.1
-
-  # Icons
-  cupertino_icons: ^1.0.8
-
-  # Url launcher
-  url_launcher: ^6.3.0
-
-  # Flutter SVG (optional icons)
-  flutter_svg: ^2.0.10+1
+  firebase_core: ^4.12.1
+  firebase_messaging: ^16.4.3
+  flutter_local_notifications: ^18.0.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/images/nexus_logo.png
+  min_sdk_android: 21
+  remove_alpha_ios: true
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: assets/images/nexus_logo_adaptive_foreground.png
+  web:
+    generate: true
+    image_path: assets/images/nexus_logo.png
+    background_color: "#FFFFFF"
+    theme_color: "#2563EB"
 
 flutter:
   uses-material-design: true
   assets:
     - assets/images/
+  fonts:
+    - family: Poppins
+      fonts:
+        - asset: assets/fonts/Poppins-Regular.ttf
+        - asset: assets/fonts/Poppins-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Poppins-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Poppins-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Poppins-ExtraBold.ttf
+          weight: 800

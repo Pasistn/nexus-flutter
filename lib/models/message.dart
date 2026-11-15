@@ -1,11 +1,4 @@
 class Message {
-  final String id;
-  final String conversationId;
-  final String senderId;
-  final String senderName;
-  final String content;
-  final DateTime createdAt;
-
   const Message({
     required this.id,
     required this.conversationId,
@@ -14,6 +7,13 @@ class Message {
     required this.content,
     required this.createdAt,
   });
+
+  final String id;
+  final String conversationId;
+  final String senderId;
+  final String senderName;
+  final String content;
+  final DateTime createdAt;
 
   factory Message.fromJson(Map<String, dynamic> json) => Message(
         id: json['id'] as String,

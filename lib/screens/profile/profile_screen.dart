@@ -1,17 +1,27 @@
-import 'dart:io';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/text_utils.dart';
 import '../../models/profile.dart';
 import '../../models/rating.dart';
+import '../../models/skill.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/profile_provider.dart';
 import '../../providers/ratings_provider.dart';
-import '../../screens/profile/all_reviews_screen.dart';
+import '../../providers/skills_provider.dart';
 import '../../services/geocoding_service.dart';
-import '../../widgets/star_rating_bar.dart';
+import '../../widgets/feedback.dart';
+import '../../widgets/review_card.dart';
+import '../../widgets/skill_type_style.dart';
+import '../../widgets/star_rating.dart';
+import '../../widgets/user_avatar.dart';
+import '../legal/privacy_policy_screen.dart';
+import 'all_reviews_screen.dart';
+
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -20,228 +30,270 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  final _nameCtrl = TextEditingController();
-  final _bioCtrl = TextEditingController();
-  final _addressCtrl = TextEditingController();
+  final _name = TextEditingController();
+  final _bio = TextEditingController();
+  final _address = TextEditingController();
+
   bool _editing = false;
-  bool _saving = false;
+  bool _busy = false;
   String? _error;
-  File? _pendingAvatar;
-  double? _pendingLat, _pendingLng;
-  String? _loadedForUserId;
-  final PageController _reviewPageCtrl = PageController(viewportFraction: 0.88);
-  int _reviewPage = 0;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final profile = context.read<ProfileProvider>().profile;
-    if (profile != null && profile.id != _loadedForUserId) {
-      _loadedForUserId = profile.id;
-      _populateFields(profile);
-      context.read<RatingsProvider>().loadForUser(profile.id);
-    }
-  }
-
-  void _populateFields(Profile profile) {
-    _nameCtrl.text = profile.userName ?? '';
-    _bioCtrl.text = profile.bio ?? '';
-    _addressCtrl.text = profile.homeAddress ?? '';
-  }
+  XFile? _newAvatar;
+  Uint8List? _newAvatarBytes;
+  GeocodingResult? _newHome;
+  String? _ratingsRequestedFor;
 
   @override
   void dispose() {
-    _nameCtrl.dispose();
-    _bioCtrl.dispose();
-    _addressCtrl.dispose();
-    _reviewPageCtrl.dispose();
+    _name.dispose();
+    _bio.dispose();
+    _address.dispose();
     super.dispose();
   }
 
+  void _startEditing(Profile profile) {
+    _name.text = profile.userName ?? '';
+    _bio.text = profile.bio ?? '';
+    _address.text = profile.homeAddress ?? '';
+    setState(() {
+      _editing = true;
+      _error = null;
+    });
+  }
+
+  void _cancelEditing() {
+    setState(() {
+      _editing = false;
+      _error = null;
+      _newAvatar = null;
+      _newAvatarBytes = null;
+      _newHome = null;
+    });
+  }
+
   Future<void> _pickAvatar() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(
+    final file = await ImagePicker().pickImage(
       source: ImageSource.gallery,
       maxWidth: 512,
       maxHeight: 512,
       imageQuality: 85,
     );
-    if (picked != null) {
-      setState(() => _pendingAvatar = File(picked.path));
-    }
-  }
-
-  Future<void> _geocodeAddress() async {
-    final address = _addressCtrl.text.trim();
-    if (address.isEmpty) return;
-
-    final result = await GeocodingService.geocode(address);
-    if (result != null) {
-      setState(() {
-        _pendingLat = result.lat;
-        _pendingLng = result.lng;
-        _addressCtrl.text = result.displayName;
-      });
-    }
-  }
-
-  Future<void> _save() async {
+    if (file == null) return;
+    final bytes = await file.readAsBytes();
+    if (!mounted) return;
     setState(() {
-      _saving = true;
+      _newAvatar = file;
+      _newAvatarBytes = bytes;
+    });
+  }
+
+  Future<void> _lookupAddress() async {
+    final query = _address.text.trim();
+    if (query.isEmpty) return;
+    final hit = await GeocodingService.geocode(query);
+    if (!mounted) return;
+    setState(() {
+      _newHome = hit;
+      _error = hit == null ? 'Adresse wurde nicht gefunden.' : null;
+      if (hit != null) _address.text = hit.displayName;
+    });
+  }
+
+  Future<void> _save(Profile current) async {
+    setState(() {
+      _busy = true;
       _error = null;
     });
 
-    final profileProv = context.read<ProfileProvider>();
-    final auth = context.read<AuthProvider>();
-    final userId = auth.currentUser!.id;
-    final existing = profileProv.profile;
-
-    String? avatarUrl = existing?.avatarUrl;
-    if (_pendingAvatar != null) {
-      avatarUrl = await profileProv.uploadAvatar(userId, _pendingAvatar!);
-    }
-
-    final updated = Profile(
-      id: userId,
-      userName: _nameCtrl.text.trim(),
-      bio: _bioCtrl.text.trim(),
-      avatarUrl: avatarUrl,
-      homeAddress: _addressCtrl.text.trim(),
-      homeLat: _pendingLat ?? existing?.homeLat,
-      homeLng: _pendingLng ?? existing?.homeLng,
+    final address = nullIfBlank(_address.text);
+    final draft = Profile(
+      id: current.id,
+      userName: nullIfBlank(_name.text),
+      bio: nullIfBlank(_bio.text),
+      avatarUrl: current.avatarUrl,
+      homeAddress: address,
+      homeLat: address == null ? null : _newHome?.lat ?? current.homeLat,
+      homeLng: address == null ? null : _newHome?.lng ?? current.homeLng,
     );
 
-    final err = await profileProv.upsertProfile(updated);
+    final err = await context
+        .read<ProfileProvider>()
+        .save(draft, avatar: _newAvatar);
+    if (!mounted) return;
 
+    setState(() => _busy = false);
+    if (err != null) {
+      setState(() => _error = err);
+    } else {
+      _cancelEditing();
+      context.read<SkillsProvider>().load(silent: true);
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Konto löschen?'),
+        content: const Text(
+          'Dein Profil, deine Skills, Chats und Bewertungen werden '
+          'dauerhaft gelöscht. Das lässt sich nicht rückgängig machen.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Abbrechen'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: kError),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Endgültig löschen'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _busy = true);
+    final err = await context.read<AuthProvider>().deleteAccount();
     if (!mounted) return;
     setState(() {
-      _saving = false;
-      _error = err;
-      if (err == null) _editing = false;
+      _busy = false;
+      if (err != null) _error = 'Löschen fehlgeschlagen: $err';
     });
+  }
+
+  Future<void> _deleteSkill(Skill skill) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eintrag löschen?'),
+        content: Text('„${skill.title}“ wird entfernt.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Abbrechen'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: kError),
+            child: const Text('Löschen'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final err = await context.read<SkillsProvider>().remove(skill.id);
+    if (mounted && err != null) showSnack(context, err, error: true);
   }
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    final profileProv = context.watch<ProfileProvider>();
-    final profile = profileProv.profile;
-    final ratingSummary = profile != null
-        ? context.watch<RatingsProvider>().getSummary(profile.id)
-        : null;
+    final provider = context.watch<ProfileProvider>();
+    final profile = provider.profile;
 
-    if (!auth.isAuthenticated) {
-      return const Center(
-        child: Text('Bitte anmelden', style: TextStyle(color: kTextSecondary)),
+    if (profile == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Profil')),
+        body: provider.loading
+            ? const Center(child: CircularProgressIndicator())
+            : EmptyState(
+                icon: Icons.person_off_outlined,
+                title: 'Profil nicht geladen',
+                message: provider.error,
+              ),
       );
     }
 
+    if (_ratingsRequestedFor != profile.id) {
+      _ratingsRequestedFor = profile.id;
+      context.read<RatingsProvider>().ensureLoaded(profile.id);
+    }
+    final summary = context.watch<RatingsProvider>().summaryFor(profile.id);
+    final mySkills = context.watch<SkillsProvider>().ownedBy(profile.id);
+
     return Scaffold(
-      backgroundColor: kBgDark,
       appBar: AppBar(
         title: const Text('Profil'),
         actions: [
-          if (!_editing)
-            IconButton(
-              icon: const Icon(Icons.edit_outlined),
-              onPressed: () {
-                if (profile != null) _populateFields(profile);
-                setState(() => _editing = true);
-              },
-            )
+          if (_editing)
+            TextButton(onPressed: _cancelEditing, child: const Text('Abbrechen'))
           else
-            TextButton(
-              onPressed: () => setState(() {
-                _editing = false;
-                _pendingAvatar = null;
-              }),
-              child: const Text('Abbrechen'),
+            IconButton(
+              tooltip: 'Bearbeiten',
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: () => _startEditing(profile),
             ),
           IconButton(
+            tooltip: 'Abmelden',
             icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await auth.signOut();
-              context.read<ProfileProvider>().clear();
-            },
+            onPressed: context.read<AuthProvider>().signOut,
           ),
         ],
       ),
-      body: SingleChildScrollView(
+      body: ListView(
         padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            _buildAvatarSection(profile),
-            const SizedBox(height: 16),
-            if (ratingSummary != null)
-              _buildRatingSection(ratingSummary),
-            const SizedBox(height: 16),
-            if (_editing) ...[
-              _buildEditForm(),
-            ] else ...[
-              _buildInfoCard(profile),
-            ],
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: kError.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: kError.withOpacity(0.3)),
-                ),
-                child: Text(_error!,
-                    style: const TextStyle(color: kError, fontSize: 13)),
-              ),
-            ],
+        children: [
+          _header(profile),
+          const SizedBox(height: 24),
+          if (_editing) _form(profile) else _info(profile),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            ErrorBanner(_error!),
           ],
-        ),
+          const SizedBox(height: 28),
+          if (summary != null) _RatingsSection(profile: profile, summary: summary),
+          if (mySkills.isNotEmpty) ...[
+            const SizedBox(height: 28),
+            _OwnSkills(skills: mySkills, onDelete: _deleteSkill),
+          ],
+          const SizedBox(height: 28),
+          const Divider(),
+          TextButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen()),
+            ),
+            icon: const Icon(Icons.privacy_tip_outlined, size: 16, color: kTextMuted),
+            label: const Text(
+              'Datenschutzerklärung',
+              style: TextStyle(color: kTextMuted, fontSize: 13),
+            ),
+          ),
+          TextButton.icon(
+            onPressed: _busy ? null : _deleteAccount,
+            icon: const Icon(Icons.delete_forever_outlined, size: 16, color: kError),
+            label: const Text(
+              'Konto löschen',
+              style: TextStyle(color: kError, fontSize: 13),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildAvatarSection(Profile? profile) {
+  Widget _header(Profile profile) {
+    final preview = _newAvatarBytes;
+
     return Column(
       children: [
         Stack(
           children: [
-            CircleAvatar(
+            UserAvatar(
+              url: profile.avatarUrl,
+              name: profile.userName,
               radius: 52,
-              backgroundColor: kBgCard,
-              backgroundImage: _pendingAvatar != null
-                  ? FileImage(_pendingAvatar!) as ImageProvider
-                  : (profile?.avatarUrl != null
-                      ? CachedNetworkImageProvider(profile!.avatarUrl!)
-                      : null),
-              child:
-                  (_pendingAvatar == null && profile?.avatarUrl == null)
-                      ? Text(
-                          profile?.userName
-                                  ?.substring(0, 1)
-                                  .toUpperCase() ??
-                              '?',
-                          style: const TextStyle(
-                              color: kNeonOrange,
-                              fontSize: 32,
-                              fontWeight: FontWeight.w800),
-                        )
-                      : null,
+              image: preview == null ? null : MemoryImage(preview),
             ),
             if (_editing)
               Positioned(
-                bottom: 0,
                 right: 0,
-                child: GestureDetector(
-                  onTap: _pickAvatar,
-                  child: Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: kNeonOrange,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: kBgDark, width: 2),
-                    ),
-                    child: const Icon(Icons.camera_alt,
-                        color: Colors.black, size: 16),
+                bottom: 0,
+                child: IconButton.filled(
+                  onPressed: _pickAvatar,
+                  icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                  style: IconButton.styleFrom(
+                    backgroundColor: kPrimary,
+                    side: const BorderSide(color: Colors.white, width: 2),
                   ),
                 ),
               ),
@@ -249,306 +301,278 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         const SizedBox(height: 12),
         Text(
-          profile?.userName ?? 'Kein Name',
+          profile.userName ?? 'Noch kein Name',
           style: const TextStyle(
-              color: kTextPrimary,
-              fontSize: 20,
-              fontWeight: FontWeight.w700),
+            color: kTextPrimary,
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+          ),
         ),
-        if (profile?.bio?.isNotEmpty ?? false) ...[
-          const SizedBox(height: 4),
-          Text(profile!.bio!,
+        if (profile.bio?.isNotEmpty ?? false)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              profile.bio!,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                  color: kTextSecondary, fontSize: 14, height: 1.4)),
-        ],
+              style: const TextStyle(color: kTextSecondary, fontSize: 14, height: 1.4),
+            ),
+          ),
       ],
     );
   }
 
-  Widget _buildRatingSection(RatingSummary summary) {
-    final reviews = summary.reviews.take(5).toList();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Header
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 2),
+  Widget _info(Profile profile) {
+    Widget row(IconData icon, String label, String? value) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.star_rounded, color: kNeonOrange, size: 18),
-              const SizedBox(width: 6),
-              const Text('Bewertungen',
-                  style: TextStyle(
-                      color: kTextPrimary,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 16)),
-              const Spacer(),
-              if (summary.count > 0)
-                GestureDetector(
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => AllReviewsScreen(
-                        userId: context.read<ProfileProvider>().profile!.id,
-                        userName: context.read<ProfileProvider>().profile?.userName ?? '',
-                      ),
-                    ),
-                  ),
-                  child: const Text('Alle anzeigen',
-                      style: TextStyle(color: kNeonOrange, fontSize: 13)),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 4),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 2),
-          child: StarRatingBar(
-              rating: summary.avg, count: summary.count, size: 14),
-        ),
-        const SizedBox(height: 12),
-        if (reviews.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: kBgCard,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: kBorderColor),
-            ),
-            child: const Center(
-              child: Text('Noch keine Bewertungen erhalten.',
-                  style: TextStyle(color: kTextMuted, fontSize: 13)),
-            ),
-          )
-        else ...[
-          SizedBox(
-            height: 150,
-            child: PageView.builder(
-              controller: _reviewPageCtrl,
-              itemCount: reviews.length,
-              onPageChanged: (i) => setState(() => _reviewPage = i),
-              itemBuilder: (_, i) => _buildReviewCard(reviews[i]),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(reviews.length, (i) {
-              final active = i == _reviewPage;
-              return AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.symmetric(horizontal: 3),
-                width: active ? 16 : 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: active ? kNeonOrange : kTextMuted.withOpacity(0.4),
-                  borderRadius: BorderRadius.circular(3),
-                ),
-              );
-            }),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildReviewCard(Rating review) {
-    final raterName = review.raterName ?? 'Anonym';
-    final createdAt = review.createdAt;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: kBgCard,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: kBorderColor),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 14,
-                  backgroundColor: kBgCardElevated,
-                  child: Text(
-                    raterName.substring(0, 1).toUpperCase(),
-                    style: const TextStyle(
-                        color: kNeonOrange,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(raterName,
-                      style: const TextStyle(
-                          color: kTextPrimary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600)),
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: List.generate(
-                    5,
-                    (i) => Icon(
-                      i < review.rating
-                          ? Icons.star_rounded
-                          : Icons.star_outline_rounded,
-                      color: i < review.rating ? kNeonOrange : kTextMuted,
-                      size: 14,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            if (createdAt != null) ...[
-              const SizedBox(height: 2),
-              Text(
-                '${createdAt.day}.${createdAt.month}.${createdAt.year}',
-                style: const TextStyle(color: kTextMuted, fontSize: 11),
-              ),
-            ],
-            if (review.comment != null && review.comment!.isNotEmpty) ...[
-              const SizedBox(height: 8),
+              Icon(icon, color: kTextMuted, size: 18),
+              const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  review.comment!,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      color: kTextSecondary, fontSize: 13, height: 1.4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label, style: const TextStyle(color: kTextMuted, fontSize: 11)),
+                    Text(
+                      value ?? '—',
+                      style: const TextStyle(color: kTextPrimary, fontSize: 14),
+                    ),
+                  ],
                 ),
               ),
             ],
+          ),
+        );
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        child: Column(
+          children: [
+            row(Icons.person_outline, 'Name', profile.userName),
+            const Divider(),
+            row(Icons.notes_outlined, 'Über mich', profile.bio),
+            const Divider(),
+            row(Icons.home_outlined, 'Heimatort (Radar-Zentrum)', profile.homeAddress),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildInfoCard(Profile? profile) {
-    if (profile == null) return const SizedBox();
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: kBgCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: kBorderColor),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Profil-Info',
-              style: TextStyle(
-                  color: kTextPrimary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16)),
-          const SizedBox(height: 12),
-          _infoRow(Icons.person_outline, 'Name',
-              profile.userName ?? '—'),
-          const Divider(),
-          _infoRow(Icons.info_outline, 'Bio', profile.bio ?? '—'),
-          const Divider(),
-          _infoRow(Icons.location_on_outlined, 'Heimatort',
-              profile.homeAddress ?? '—'),
-        ],
-      ),
-    );
-  }
-
-  Widget _infoRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: kTextMuted, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label,
-                    style: const TextStyle(color: kTextMuted, fontSize: 11)),
-                Text(value,
-                    style: const TextStyle(
-                        color: kTextPrimary, fontSize: 14)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-
-  Widget _buildEditForm() {
+  Widget _form(Profile profile) {
     return Column(
       children: [
-        TextFormField(
-          controller: _nameCtrl,
+        TextField(
+          controller: _name,
+          maxLength: ProfileProvider.maxNameLength,
           decoration: const InputDecoration(
+            counterText: '',
             labelText: 'Anzeigename',
-            prefixIcon:
-                Icon(Icons.person_outline, color: kTextMuted, size: 20),
+            prefixIcon: Icon(Icons.person_outline, color: kTextMuted, size: 20),
           ),
         ),
         const SizedBox(height: 14),
-        TextFormField(
-          controller: _bioCtrl,
-          maxLines: 3,
+        TextField(
+          controller: _bio,
+          minLines: 2,
+          maxLines: 4,
+          maxLength: ProfileProvider.maxBioLength,
           decoration: const InputDecoration(
             labelText: 'Über mich',
-            prefixIcon: Icon(Icons.info_outline, color: kTextMuted, size: 20),
             alignLabelWithHint: true,
           ),
         ),
-        const SizedBox(height: 14),
-        TextFormField(
-          controller: _addressCtrl,
+        const SizedBox(height: 6),
+        TextField(
+          controller: _address,
+          maxLength: ProfileProvider.maxAddressLength,
+          onSubmitted: (_) => _lookupAddress(),
           decoration: InputDecoration(
+            counterText: '',
             labelText: 'Heimatort / Radar-Zentrum',
-            prefixIcon: const Icon(Icons.location_on_outlined,
-                color: kTextMuted, size: 20),
+            helperText: 'Nur für dich sichtbar',
+            prefixIcon: const Icon(Icons.home_outlined, color: kTextMuted, size: 20),
             suffixIcon: IconButton(
-              icon: const Icon(Icons.search, color: kNeonOrange, size: 20),
-              onPressed: _geocodeAddress,
+              tooltip: 'Adresse suchen',
+              icon: const Icon(Icons.search, color: kPrimary),
+              onPressed: _lookupAddress,
             ),
           ),
-          onFieldSubmitted: (_) => _geocodeAddress(),
         ),
-        if (_pendingLat != null) ...[
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              const Icon(Icons.check_circle, color: kSuccess, size: 14),
-              const SizedBox(width: 6),
-              Text(
-                'Koordinaten: ${_pendingLat!.toStringAsFixed(4)}, ${_pendingLng!.toStringAsFixed(4)}',
-                style: const TextStyle(color: kSuccess, fontSize: 12),
-              ),
-            ],
+        if (_newHome != null)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Row(
+              children: [
+                Icon(Icons.check_circle, color: kSuccess, size: 14),
+                SizedBox(width: 6),
+                Text(
+                  'Adresse gefunden',
+                  style: TextStyle(color: kSuccess, fontSize: 12),
+                ),
+              ],
+            ),
           ),
-        ],
         const SizedBox(height: 20),
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: _saving ? null : _save,
-            child: _saving
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                        color: Colors.black, strokeWidth: 2))
-                : const Text('Änderungen speichern'),
+            onPressed: _busy ? null : () => _save(profile),
+            child: _busy ? const ButtonSpinner() : const Text('Speichern'),
           ),
         ),
+      ],
+    );
+  }
+}
+
+class _RatingsSection extends StatefulWidget {
+  const _RatingsSection({required this.profile, required this.summary});
+
+  final Profile profile;
+  final RatingSummary summary;
+
+  @override
+  State<_RatingsSection> createState() => _RatingsSectionState();
+}
+
+class _RatingsSectionState extends State<_RatingsSection> {
+  final _pages = PageController(viewportFraction: 0.9);
+  int _page = 0;
+
+  @override
+  void dispose() {
+    _pages.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = widget.summary;
+    final latest = summary.reviews.take(5).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text(
+              'Bewertungen',
+              style: TextStyle(
+                color: kTextPrimary,
+                fontWeight: FontWeight.w700,
+                fontSize: 16,
+              ),
+            ),
+            const Spacer(),
+            if (summary.count > 0)
+              TextButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => AllReviewsScreen(
+                      userId: widget.profile.id,
+                      userName: widget.profile.userName ?? '',
+                    ),
+                  ),
+                ),
+                child: const Text('Alle anzeigen'),
+              ),
+          ],
+        ),
+        RatingSummaryLine(average: summary.average, count: summary.count, size: 14),
+        const SizedBox(height: 12),
+        if (latest.isEmpty)
+          const Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: Center(
+                child: Text(
+                  'Noch keine Bewertungen erhalten.',
+                  style: TextStyle(color: kTextMuted, fontSize: 13),
+                ),
+              ),
+            ),
+          )
+        else ...[
+          SizedBox(
+            height: 140,
+            child: PageView.builder(
+              controller: _pages,
+              padEnds: false,
+              itemCount: latest.length,
+              onPageChanged: (i) => setState(() => _page = i),
+              itemBuilder: (_, i) => Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: ReviewCard(review: latest[i], compact: true),
+              ),
+            ),
+          ),
+          if (latest.length > 1) ...[
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (var i = 0; i < latest.length; i++)
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    width: i == _page ? 16 : 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: i == _page ? kPrimary : kBorder,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ],
+    );
+  }
+}
+
+class _OwnSkills extends StatelessWidget {
+  const _OwnSkills({required this.skills, required this.onDelete});
+
+  final List<Skill> skills;
+  final ValueChanged<Skill> onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Meine Einträge (${skills.length})',
+          style: const TextStyle(
+            color: kTextPrimary,
+            fontWeight: FontWeight.w700,
+            fontSize: 16,
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final s in skills)
+          Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListTile(
+              leading: Icon(s.type.icon, color: s.type.color),
+              title: Text(s.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: Text(
+                s.categoryName ?? s.type.badge,
+                style: const TextStyle(fontSize: 12),
+              ),
+              trailing: IconButton(
+                tooltip: 'Löschen',
+                icon: const Icon(Icons.delete_outline, color: kTextMuted),
+                onPressed: () => onDelete(s),
+              ),
+            ),
+          ),
       ],
     );
   }

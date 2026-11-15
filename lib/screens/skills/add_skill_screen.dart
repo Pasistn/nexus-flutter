@@ -1,19 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/theme/app_theme.dart';
-import '../../models/category.dart' show SkillCategory;
+import '../../core/utils/text_utils.dart';
+import '../../models/category.dart';
 import '../../models/skill.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/category_provider.dart';
 import '../../providers/profile_provider.dart';
 import '../../providers/skills_provider.dart';
 import '../../services/geocoding_service.dart';
+import '../../services/location_service.dart';
+import '../../widgets/feedback.dart';
+import '../../widgets/segmented_choice.dart';
+import '../../widgets/skill_type_style.dart';
 
 class AddSkillScreen extends StatefulWidget {
-  final String initialType;
+  const AddSkillScreen({super.key, this.initialType = SkillType.offering});
 
-  const AddSkillScreen({super.key, this.initialType = 'offering'});
+  final SkillType initialType;
 
   @override
   State<AddSkillScreen> createState() => _AddSkillScreenState();
@@ -21,86 +26,104 @@ class AddSkillScreen extends StatefulWidget {
 
 class _AddSkillScreenState extends State<AddSkillScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _titleCtrl = TextEditingController();
-  final _descCtrl = TextEditingController();
-  final _locationCtrl = TextEditingController();
-  final _tagsCtrl = TextEditingController();
-  double? _lat, _lng;
+  final _title = TextEditingController();
+  final _description = TextEditingController();
+  final _location = TextEditingController();
+  final _tags = TextEditingController();
+
+  late SkillType _type = widget.initialType;
+  SkillCategory? _category;
+  double? _lat;
+  double? _lng;
   bool _locating = false;
   bool _saving = false;
   String? _error;
-  SkillCategory? _selectedCategory;
-  late String _skillType;
+
+  bool get _isSearch => _type == SkillType.searching;
 
   @override
   void initState() {
     super.initState();
-    _skillType = widget.initialType;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<CategoryProvider>().loadCategories();
-    });
+    final home = context.read<ProfileProvider>().profile;
+    if (home != null && home.hasHome) {
+      _lat = home.homeLat;
+      _lng = home.homeLng;
+      _location.text = home.homeAddress ?? '';
+    }
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => context.read<CategoryProvider>().load(),
+    );
   }
 
   @override
   void dispose() {
-    _titleCtrl.dispose();
-    _descCtrl.dispose();
-    _locationCtrl.dispose();
-    _tagsCtrl.dispose();
+    _title.dispose();
+    _description.dispose();
+    _location.dispose();
+    _tags.dispose();
     super.dispose();
   }
 
   Future<void> _useCurrentLocation() async {
-    setState(() => _locating = true);
+    setState(() {
+      _locating = true;
+      _error = null;
+    });
     try {
-      final perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) {
-        await Geolocator.requestPermission();
-      }
-      final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.medium);
+      final pos = await LocationService.current();
+      final address = await GeocodingService.reverseGeocode(
+        pos.latitude,
+        pos.longitude,
+      );
+      if (!mounted) return;
       setState(() {
         _lat = pos.latitude;
         _lng = pos.longitude;
+        if (address != null) {
+          _location.text = address.split(',').take(2).join(',').trim();
+        }
       });
-      final address = await GeocodingService.reverseGeocode(_lat!, _lng!);
-      if (address != null && mounted) {
-        setState(() => _locationCtrl.text = address.split(',').take(2).join(', '));
-      }
-    } catch (e) {
-      setState(() => _error = 'Standort konnte nicht ermittelt werden.');
+    } on LocationUnavailable catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Standort konnte nicht ermittelt werden.');
     } finally {
       if (mounted) setState(() => _locating = false);
     }
   }
 
-  Future<void> _geocodeAddress() async {
-    final address = _locationCtrl.text.trim();
-    if (address.isEmpty) return;
+  Future<void> _lookupAddress() async {
+    final query = _location.text.trim();
+    if (query.isEmpty) return;
 
-    setState(() => _locating = true);
-    final result = await GeocodingService.geocode(address);
+    setState(() {
+      _locating = true;
+      _error = null;
+    });
+    final hit = await GeocodingService.geocode(query);
     if (!mounted) return;
-
-    if (result != null) {
-      setState(() {
-        _lat = result.lat;
-        _lng = result.lng;
-      });
-    } else {
-      setState(() => _error = 'Adresse konnte nicht gefunden werden.');
-    }
-    setState(() => _locating = false);
+    setState(() {
+      _locating = false;
+      if (hit == null) {
+        _error = 'Adresse konnte nicht gefunden werden.';
+      } else {
+        _lat = hit.lat;
+        _lng = hit.lng;
+      }
+    });
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_selectedCategory == null) {
-      setState(() => _error = 'Bitte wähle eine Kategorie aus.');
-      return;
-    }
-    if (_lat == null || _lng == null) {
-      setState(() => _error = 'Bitte gib einen Standort an.');
+
+    final userId = context.read<AuthProvider>().userId;
+    final missing = switch ((_category, _lat)) {
+      (null, _) => 'Bitte wähle eine Kategorie aus.',
+      (_, null) => 'Bitte gib einen Standort an.',
+      _ => null,
+    };
+    if (missing != null || userId == null) {
+      setState(() => _error = missing);
       return;
     }
 
@@ -109,281 +132,196 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
       _error = null;
     });
 
-    final auth = context.read<AuthProvider>();
-    final profile = context.read<ProfileProvider>().profile;
-
-    final tags = _tagsCtrl.text
-        .split(',')
-        .map((t) => t.trim())
-        .where((t) => t.isNotEmpty)
-        .toList();
-
-    final skill = Skill(
-      id: '',
-      userId: auth.currentUser!.id,
-      userName: profile?.userName,
-      avatarUrl: profile?.avatarUrl,
-      skillTitle: _titleCtrl.text.trim(),
-      description: _descCtrl.text.trim(),
-      lat: _lat!,
-      lng: _lng!,
-      tags: tags,
-      categoryId: _selectedCategory!.id,
-      skillType: _skillType,
-    );
-
-    final err = await context.read<SkillsProvider>().addSkill(skill);
+    final err = await context.read<SkillsProvider>().add(
+          Skill(
+            id: '',
+            userId: userId,
+            title: _title.text.trim(),
+            description: _description.text.trim(),
+            lat: _lat!,
+            lng: _lng!,
+            type: _type,
+            tags: parseTags(_tags.text),
+            categoryId: _category!.id,
+          ),
+        );
 
     if (!mounted) return;
-    if (err != null) {
+    if (err == null) {
+      Navigator.of(context).pop(true);
+    } else {
       setState(() {
         _saving = false;
         _error = err;
       });
-    } else {
-      Navigator.of(context).pop();
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final categories = context.watch<CategoryProvider>().categories;
-    final isSearching = _skillType == 'searching';
-    final accentColor = isSearching ? kError : kNeonOrange;
+    final accent = _type.color;
 
     return Scaffold(
-      backgroundColor: kBgDark,
-      appBar: AppBar(
-        title: Text(isSearching ? 'Skill suchen' : 'Skill anbieten'),
-      ),
+      appBar: AppBar(title: Text(_isSearch ? 'Skill suchen' : 'Skill anbieten')),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildTypeToggle(accentColor),
-                const SizedBox(height: 20),
-                _buildSectionHeader(
-                  isSearching ? 'Was suchst du?' : 'Was bietest du an?',
-                  isSearching ? Icons.search : Icons.bolt,
-                  accentColor,
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _titleCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Skill-Titel *',
-                    hintText: isSearching
-                        ? 'z. B. Fahrrad-Reparatur'
-                        : 'z. B. Gitarrenunterricht für Anfänger',
-                    prefixIcon: const Icon(Icons.title, color: kTextMuted, size: 20),
+        child: Form(
+          key: _formKey,
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              SegmentedChoice<SkillType>(
+                selected: _type,
+                onChanged: (t) => setState(() => _type = t),
+                options: const [
+                  ChoiceOption(
+                    value: SkillType.offering,
+                    label: 'Anbieten',
+                    icon: Icons.bolt,
                   ),
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? 'Bitte einen Titel eingeben'
-                      : null,
-                ),
-                const SizedBox(height: 14),
-                TextFormField(
-                  controller: _descCtrl,
-                  maxLines: 4,
-                  decoration: InputDecoration(
-                    labelText: 'Beschreibung *',
-                    hintText: isSearching
-                        ? 'Beschreibe was du brauchst und wie du dir die Hilfe vorstellst...'
-                        : 'Beschreibe deine Fähigkeit, Erfahrung und was du anbietest...',
-                    prefixIcon: const Icon(Icons.description_outlined,
-                        color: kTextMuted, size: 20),
-                    alignLabelWithHint: true,
+                  ChoiceOption(
+                    value: SkillType.searching,
+                    label: 'Suchen',
+                    icon: Icons.search_rounded,
+                    color: kError,
                   ),
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? 'Bitte eine Beschreibung eingeben'
-                      : null,
+                ],
+              ),
+              const SizedBox(height: 24),
+              _Section(
+                _isSearch ? 'Was suchst du?' : 'Was bietest du an?',
+                icon: _type.icon,
+                color: accent,
+              ),
+              TextFormField(
+                controller: _title,
+                maxLength: SkillsProvider.maxTitleLength,
+                textInputAction: TextInputAction.next,
+                decoration: InputDecoration(
+                  labelText: 'Titel',
+                  hintText: _isSearch
+                      ? 'z. B. Hilfe bei Fahrrad-Reparatur'
+                      : 'z. B. Gitarrenunterricht für Anfänger',
                 ),
-                const SizedBox(height: 14),
-                _buildCategoryPicker(categories, accentColor),
-                const SizedBox(height: 14),
-                TextFormField(
-                  controller: _tagsCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Tags (kommagetrennt)',
-                    hintText: 'Musik, Anfänger, Online',
-                    prefixIcon: Icon(Icons.tag, color: kTextMuted, size: 20),
-                  ),
+                validator: (v) =>
+                    (v?.trim().isEmpty ?? true) ? 'Bitte einen Titel eingeben' : null,
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _description,
+                minLines: 3,
+                maxLines: 6,
+                maxLength: SkillsProvider.maxDescriptionLength,
+                decoration: InputDecoration(
+                  labelText: 'Beschreibung',
+                  alignLabelWithHint: true,
+                  hintText: _isSearch
+                      ? 'Was brauchst du genau und wie stellst du dir die Hilfe vor?'
+                      : 'Was kannst du, wie viel Erfahrung hast du, was bietest du an?',
                 ),
-                const SizedBox(height: 24),
-                _buildSectionHeader('Standort', Icons.location_on, accentColor),
-                const SizedBox(height: 8),
-                Row(
+                validator: (v) => (v?.trim().isEmpty ?? true)
+                    ? 'Bitte eine Beschreibung eingeben'
+                    : null,
+              ),
+              const SizedBox(height: 16),
+              _Section('Kategorie', icon: Icons.category_outlined, color: accent),
+              if (categories.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                )
+              else
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: _locationCtrl,
-                        decoration: InputDecoration(
-                          labelText: 'Adresse / Ort',
-                          hintText: 'München, Bayern',
-                          prefixIcon: const Icon(Icons.location_on_outlined,
-                              color: kTextMuted, size: 20),
-                          suffixIcon: IconButton(
-                            icon: const Icon(Icons.search,
-                                color: kNeonOrange, size: 20),
-                            onPressed: _geocodeAddress,
-                          ),
-                        ),
-                        onFieldSubmitted: (_) => _geocodeAddress(),
+                    for (final c in categories)
+                      PillChip(
+                        label: c.name,
+                        emoji: c.icon,
+                        color: accent,
+                        selected: _category?.id == c.id,
+                        onTap: () => setState(() => _category = c),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: _locating ? null : _useCurrentLocation,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.all(14),
-                        minimumSize: const Size(50, 50),
-                      ),
-                      child: _locating
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                  color: Colors.black, strokeWidth: 2))
-                          : const Icon(Icons.my_location, size: 20),
-                    ),
                   ],
                 ),
-                if (_lat != null) ...[
-                  const SizedBox(height: 8),
-                  Row(
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _tags,
+                maxLength: 300,
+                decoration: const InputDecoration(
+                  counterText: '',
+                  labelText: 'Tags (kommagetrennt)',
+                  hintText: 'Musik, Anfänger, Online',
+                  prefixIcon: Icon(Icons.tag, color: kTextMuted, size: 20),
+                ),
+              ),
+              const SizedBox(height: 24),
+              _Section('Standort', icon: Icons.location_on_outlined, color: accent),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _location,
+                      maxLength: 200,
+                      onChanged: (_) {
+                        if (_lat != null) setState(() => _lat = _lng = null);
+                      },
+                      onFieldSubmitted: (_) => _lookupAddress(),
+                      decoration: InputDecoration(
+                        counterText: '',
+                        labelText: 'Adresse oder Ort',
+                        hintText: 'z. B. München, Schwabing',
+                        suffixIcon: IconButton(
+                          tooltip: 'Adresse suchen',
+                          icon: const Icon(Icons.search, color: kPrimary),
+                          onPressed: _locating ? null : _lookupAddress,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: _locating ? null : _useCurrentLocation,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                      ),
+                      child: _locating
+                          ? const ButtonSpinner()
+                          : const Icon(Icons.my_location, size: 20),
+                    ),
+                  ),
+                ],
+              ),
+              if (_lat != null)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Row(
                     children: [
-                      const Icon(Icons.check_circle, color: kSuccess, size: 14),
-                      const SizedBox(width: 6),
+                      Icon(Icons.check_circle, color: kSuccess, size: 14),
+                      SizedBox(width: 6),
                       Text(
-                        'Koordinaten gesetzt: ${_lat!.toStringAsFixed(4)}, ${_lng!.toStringAsFixed(4)}',
-                        style: const TextStyle(color: kSuccess, fontSize: 12),
+                        'Standort gesetzt (wird auf ~100 m gerundet)',
+                        style: TextStyle(color: kSuccess, fontSize: 12),
                       ),
                     ],
                   ),
-                ],
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: kError.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: kError.withOpacity(0.3)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.error_outline, color: kError, size: 16),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(_error!,
-                              style: const TextStyle(
-                                  color: kError, fontSize: 13)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 28),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _saving ? null : _submit,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: accentColor,
-                    ),
-                    icon: _saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2))
-                        : Icon(isSearching ? Icons.search : Icons.publish, size: 18),
-                    label: Text(
-                      _saving
-                          ? 'Wird veröffentlicht...'
-                          : isSearching
-                              ? 'Gesuch veröffentlichen'
-                              : 'Skill veröffentlichen',
-                    ),
-                  ),
                 ),
+              if (_error != null) ...[
+                const SizedBox(height: 16),
+                ErrorBanner(_error!),
               ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTypeToggle(Color accentColor) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: kBgCard,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: kBorderColor),
-      ),
-      child: Row(
-        children: [
-          _buildToggleOption(
-            label: 'Anbieten',
-            icon: Icons.bolt,
-            isSelected: _skillType == 'offering',
-            selectedColor: kNeonOrange,
-            onTap: () => setState(() => _skillType = 'offering'),
-          ),
-          _buildToggleOption(
-            label: 'Suchen',
-            icon: Icons.search,
-            isSelected: _skillType == 'searching',
-            selectedColor: kError,
-            onTap: () => setState(() => _skillType = 'searching'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildToggleOption({
-    required String label,
-    required IconData icon,
-    required bool isSelected,
-    required Color selectedColor,
-    required VoidCallback onTap,
-  }) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: isSelected ? selectedColor.withOpacity(0.12) : Colors.transparent,
-            borderRadius: BorderRadius.circular(9),
-            border: Border.all(
-              color: isSelected ? selectedColor : Colors.transparent,
-              width: 1.5,
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon,
-                  size: 16,
-                  color: isSelected ? selectedColor : kTextMuted),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: isSelected ? selectedColor : kTextMuted,
-                  fontSize: 14,
-                  fontWeight:
-                      isSelected ? FontWeight.w700 : FontWeight.w400,
-                ),
+              const SizedBox(height: 28),
+              ElevatedButton.icon(
+                onPressed: _saving ? null : _submit,
+                style: ElevatedButton.styleFrom(backgroundColor: accent),
+                icon: _saving
+                    ? const ButtonSpinner()
+                    : Icon(_isSearch ? Icons.campaign_outlined : Icons.publish, size: 18),
+                label: Text(_isSearch ? 'Gesuch veröffentlichen' : 'Skill veröffentlichen'),
               ),
             ],
           ),
@@ -391,85 +329,26 @@ class _AddSkillScreenState extends State<AddSkillScreen> {
       ),
     );
   }
+}
 
-  Widget _buildCategoryPicker(List<SkillCategory> categories, Color accentColor) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.category_outlined, color: accentColor, size: 18),
-            const SizedBox(width: 8),
-            const Text('Kategorie *',
-                style: TextStyle(
-                    color: kTextPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16)),
-          ],
-        ),
-        const SizedBox(height: 10),
-        if (categories.isEmpty)
-          Center(
-              child: CircularProgressIndicator(color: accentColor, strokeWidth: 2))
-        else
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: categories.map((SkillCategory cat) {
-              final selected = _selectedCategory?.id == cat.id;
-              return GestureDetector(
-                onTap: () => setState(() => _selectedCategory = cat),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? accentColor.withOpacity(0.15)
-                        : kBgCard,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: selected ? accentColor : kBorderColor,
-                      width: selected ? 1.5 : 1,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (cat.icon != null) ...[
-                        Text(cat.icon!, style: const TextStyle(fontSize: 15)),
-                        const SizedBox(width: 6),
-                      ],
-                      Text(
-                        cat.name,
-                        style: TextStyle(
-                          color: selected ? accentColor : kTextSecondary,
-                          fontSize: 13,
-                          fontWeight: selected
-                              ? FontWeight.w700
-                              : FontWeight.w400,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-      ],
-    );
-  }
+class _Section extends StatelessWidget {
+  const _Section(this.title, {required this.icon, required this.color});
 
-  Widget _buildSectionHeader(String title, IconData icon, Color accentColor) {
-    return Row(
-      children: [
-        Icon(icon, color: accentColor, size: 18),
-        const SizedBox(width: 8),
-        Text(title,
-            style: const TextStyle(
-                color: kTextPrimary,
-                fontWeight: FontWeight.w700,
-                fontSize: 16)),
-      ],
+  final String title;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 8),
+          Text(title, style: Theme.of(context).textTheme.titleMedium),
+        ],
+      ),
     );
   }
 }

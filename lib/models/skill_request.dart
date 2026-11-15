@@ -1,4 +1,19 @@
+enum RequestStatus { pending, accepted, rejected }
+
 class SkillRequest {
+  const SkillRequest({
+    required this.id,
+    required this.skillId,
+    required this.requesterId,
+    required this.skillOwnerId,
+    required this.status,
+    required this.createdAt,
+    this.skillTitle,
+    this.requesterName,
+    this.requesterAvatar,
+    this.message,
+  });
+
   final String id;
   final String skillId;
   final String? skillTitle;
@@ -6,22 +21,11 @@ class SkillRequest {
   final String? requesterName;
   final String? requesterAvatar;
   final String skillOwnerId;
-  final String status; // 'pending', 'accepted', 'rejected'
+  final RequestStatus status;
   final String? message;
   final DateTime createdAt;
 
-  const SkillRequest({
-    required this.id,
-    required this.skillId,
-    this.skillTitle,
-    required this.requesterId,
-    this.requesterName,
-    this.requesterAvatar,
-    required this.skillOwnerId,
-    required this.status,
-    this.message,
-    required this.createdAt,
-  });
+  bool get isPending => status == RequestStatus.pending;
 
   factory SkillRequest.fromJson(Map<String, dynamic> json) => SkillRequest(
         id: json['id'] as String,
@@ -31,7 +35,8 @@ class SkillRequest {
         requesterName: json['requester_name'] as String?,
         requesterAvatar: json['requester_avatar'] as String?,
         skillOwnerId: json['skill_owner_id'] as String,
-        status: json['status'] as String? ?? 'pending',
+        status: RequestStatus.values.asNameMap()[json['status']] ??
+            RequestStatus.pending,
         message: json['message'] as String?,
         createdAt: DateTime.parse(json['created_at'] as String),
       );

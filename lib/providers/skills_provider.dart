@@ -1,186 +1,195 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../core/constants/supabase_constants.dart';
+
+import '../core/config/tables.dart';
+import '../core/utils/error_utils.dart';
 import '../core/utils/geo_utils.dart';
 import '../models/skill.dart';
 
 class SkillsProvider extends ChangeNotifier {
   final _client = Supabase.instance.client;
 
-  List<Skill> _allSkills = [];
+  static const maxTitleLength = 100;
+  static const maxDescriptionLength = 2000;
+  static const maxRadiusKm = 500.0;
+  static const _limit = 1000;
+
+  List<Skill> _skills = [];
   bool _loading = false;
   String? _error;
-  String _query = '';
-  double _radiusKm = 500;
-  String? _selectedCategoryId;
-  // null = show all, 'offering' = only offerings, 'searching' = only searches
-  String? _typeFilter;
-  RealtimeChannel? _channel;
 
-  List<Skill> get allSkills => _allSkills;
+  String _query = '';
+  double _radiusKm = maxRadiusKm;
+  String? _categoryId;
+  SkillType? _type;
+
+  RealtimeChannel? _channel;
+  Timer? _reloadTimer;
+
+  List<Skill> get all => _skills;
   bool get loading => _loading;
   String? get error => _error;
   String get query => _query;
   double get radiusKm => _radiusKm;
-  String? get selectedCategoryId => _selectedCategoryId;
-  String? get typeFilter => _typeFilter;
+  bool get isNationwide => _radiusKm >= maxRadiusKm;
+  String? get categoryId => _categoryId;
+  SkillType? get type => _type;
 
-  /// Full filtered list for the Skills tab (includes type filter).
-  List<Skill> filteredSkills({double? userLat, double? userLng}) {
-    return _applyFilters(_allSkills,
-        userLat: userLat, userLng: userLng, applyTypeFilter: true);
+  List<Skill> filtered({LatLng? origin, bool ignoreType = false}) {
+    final q = _query.trim().toLowerCase();
+    return _skills.where((s) {
+      if (!ignoreType && _type != null && s.type != _type) return false;
+      if (_categoryId != null && s.categoryId != _categoryId) return false;
+      if (q.isNotEmpty &&
+          !s.title.toLowerCase().contains(q) &&
+          !s.description.toLowerCase().contains(q) &&
+          !(s.userName?.toLowerCase().contains(q) ?? false)) {
+        return false;
+      }
+      if (origin != null &&
+          !isNationwide &&
+          distanceKm(origin.latitude, origin.longitude, s.lat, s.lng) >
+              _radiusKm) {
+        return false;
+      }
+      return true;
+    }).toList();
   }
 
-  /// Filtered list for the Radar map — type filter is intentionally excluded
-  /// so both offerings and searches always appear as markers.
-  List<Skill> filteredSkillsForRadar({double? userLat, double? userLng}) {
-    return _applyFilters(_allSkills,
-        userLat: userLat, userLng: userLng, applyTypeFilter: false);
+  void setQuery(String value) {
+    if (value == _query) return;
+    _query = value;
+    notifyListeners();
   }
 
-  List<Skill> _applyFilters(
-    List<Skill> source, {
-    double? userLat,
-    double? userLng,
-    required bool applyTypeFilter,
-  }) {
-    var result = source;
+  void setRadius(double km) {
+    _radiusKm = km;
+    notifyListeners();
+  }
 
-    if (applyTypeFilter && _typeFilter != null) {
-      result = result.where((s) => s.skillType == _typeFilter).toList();
+  void setCategory(String? id) {
+    _categoryId = id;
+    notifyListeners();
+  }
+
+  void setType(SkillType? type) {
+    _type = type;
+    notifyListeners();
+  }
+
+  Future<void> load({bool silent = false}) async {
+    if (!silent) {
+      _loading = true;
+      _error = null;
+      notifyListeners();
     }
-
-    if (_selectedCategoryId != null) {
-      result = result.where((s) => s.categoryId == _selectedCategoryId).toList();
-    }
-
-    if (_query.isNotEmpty) {
-      final q = _query.toLowerCase();
-      result = result
-          .where((s) =>
-              s.skillTitle.toLowerCase().contains(q) ||
-              s.description.toLowerCase().contains(q) ||
-              (s.userName?.toLowerCase().contains(q) ?? false))
-          .toList();
-    }
-
-    if (userLat != null && userLng != null) {
-      result = result.where((s) {
-        final dist = getDistance(userLat, userLng, s.lat, s.lng);
-        return dist <= _radiusKm;
-      }).toList();
-    }
-
-    return result;
-  }
-
-  void setQuery(String q) {
-    _query = q;
-    notifyListeners();
-  }
-
-  void setRadius(double r) {
-    _radiusKm = r;
-    notifyListeners();
-  }
-
-  void setCategory(String? categoryId) {
-    _selectedCategoryId = categoryId;
-    notifyListeners();
-  }
-
-  void setTypeFilter(String? type) {
-    _typeFilter = type;
-    notifyListeners();
-  }
-
-  Future<void> loadSkills() async {
-    _loading = true;
-    _error = null;
-    notifyListeners();
 
     try {
-      List<dynamic> data;
-      try {
-        data = await _client
-            .from(SupabaseConstants.skillsTable)
-            .select('*, categories(id, name, icon)')
-            .not('lat', 'is', null)
-            .not('lng', 'is', null)
-            .order('created_at', ascending: false);
-      } catch (_) {
-        // categories table not yet created → fall back to simple select
-        data = await _client
-            .from(SupabaseConstants.skillsTable)
-            .select()
-            .not('lat', 'is', null)
-            .not('lng', 'is', null)
-            .order('created_at', ascending: false);
-      }
+      final rows = await _client
+          .from(Tables.skills)
+          .select('*, categories(id, name, icon)')
+          .not('lat', 'is', null)
+          .not('lng', 'is', null)
+          .order('created_at', ascending: false)
+          .limit(_limit);
 
-      final userIds = (data as List)
-          .map((e) => e['user_id'])
-          .where((id) => id != null)
-          .toSet()
-          .toList();
+      final avatars = await _avatarsFor(
+        rows.map((r) => r['user_id']).whereType<String>().toSet(),
+      );
 
-      Map<String, String?> avatarMap = {};
-      if (userIds.isNotEmpty) {
-        final profiles = await _client
-            .from(SupabaseConstants.profilesTable)
-            .select('id, avatar_url')
-            .inFilter('id', userIds);
-        avatarMap = {
-          for (final p in profiles as List)
-            p['id'] as String: _resolveAvatarUrl(p['avatar_url'] as String?)
-        };
-      }
-
-      _allSkills = data.map((e) {
-        final row = Map<String, dynamic>.from(e);
-        row['avatar_url'] = avatarMap[row['user_id']];
-        return Skill.fromJson(row);
-      }).toList();
+      _skills = [
+        for (final row in rows)
+          Skill.fromJson({...row, 'avatar_url': avatars[row['user_id']]}),
+      ];
+      _error = null;
     } catch (e) {
-      _error = e.toString();
+      _error = friendlyError(e);
     } finally {
       _loading = false;
       notifyListeners();
     }
 
     _channel ??= _client
-        .channel('skills_realtime')
+        .channel('rt-skills')
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',
-          table: SupabaseConstants.skillsTable,
-          callback: (_) => loadSkills(),
+          table: Tables.skills,
+          callback: (_) {
+            _reloadTimer?.cancel();
+            _reloadTimer =
+                Timer(const Duration(seconds: 1), () => load(silent: true));
+          },
         )
         .subscribe();
   }
 
+  Future<Map<String, String?>> _avatarsFor(Set<String> userIds) async {
+    if (userIds.isEmpty) return const {};
+    final rows = await _client
+        .from(Tables.publicProfiles)
+        .select('id, avatar_url')
+        .inFilter('id', userIds.toList());
+    return {
+      for (final r in rows) r['id'] as String: r['avatar_url'] as String?,
+    };
+  }
+
+  Future<String?> add(Skill skill) async {
+    if (skill.title.isEmpty || skill.title.length > maxTitleLength) {
+      return 'Der Titel muss zwischen 1 und $maxTitleLength Zeichen lang sein.';
+    }
+    if (skill.description.isEmpty ||
+        skill.description.length > maxDescriptionLength) {
+      return 'Die Beschreibung muss zwischen 1 und $maxDescriptionLength Zeichen lang sein.';
+    }
+
+    try {
+      await _client.from(Tables.skills).insert(skill.toInsertJson());
+    } catch (e) {
+      return friendlyError(e);
+    }
+    await load(silent: true);
+    return null;
+  }
+
+  List<Skill> ownedBy(String userId) =>
+      _skills.where((s) => s.userId == userId).toList();
+
+  Future<String?> remove(String skillId) async {
+    try {
+      await _client.from(Tables.skills).delete().eq('id', skillId);
+    } catch (e) {
+      return friendlyError(e);
+    }
+    _skills = _skills.where((s) => s.id != skillId).toList();
+    notifyListeners();
+    return null;
+  }
+
+  Future<String?> report(String skillId, String reason) async {
+    try {
+      await _client.from(Tables.skillReports).insert({
+        'skill_id': skillId,
+        'reporter_id': _client.auth.currentUser?.id,
+        'reason': reason,
+      });
+      return null;
+    } on PostgrestException catch (e) {
+      if (e.code == '23505') return 'Du hast diesen Eintrag bereits gemeldet.';
+      return friendlyError(e);
+    } catch (e) {
+      return friendlyError(e);
+    }
+  }
+
   @override
   void dispose() {
-    _channel?.unsubscribe();
+    _reloadTimer?.cancel();
+    if (_channel != null) _client.removeChannel(_channel!);
     super.dispose();
-  }
-
-  String? _resolveAvatarUrl(String? raw) {
-    if (raw == null || raw.startsWith('http')) return raw;
-    return _client.storage
-        .from(SupabaseConstants.avatarsBucket)
-        .getPublicUrl(raw);
-  }
-
-  Future<String?> addSkill(Skill skill) async {
-    try {
-      await _client
-          .from(SupabaseConstants.skillsTable)
-          .insert(skill.toJson());
-      await loadSkills();
-      return null;
-    } catch (e) {
-      return e.toString();
-    }
   }
 }

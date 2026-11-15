@@ -1,11 +1,29 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../../core/config/tables.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/error_utils.dart';
+import '../../core/utils/text_utils.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
-import '../../providers/profile_provider.dart';
+import '../../widgets/feedback.dart';
+import '../../widgets/user_avatar.dart';
 import 'chat_screen.dart';
+
+class _Person {
+  _Person.fromRow(Map<String, dynamic> row)
+      : id = row['id'] as String,
+        name = row['user_name'] as String? ?? 'Anonym',
+        avatarUrl = row['avatar_url'] as String?;
+
+  final String id;
+  final String name;
+  final String? avatarUrl;
+}
 
 class CreateGroupScreen extends StatefulWidget {
   const CreateGroupScreen({super.key});
@@ -15,77 +33,85 @@ class CreateGroupScreen extends StatefulWidget {
 }
 
 class _CreateGroupScreenState extends State<CreateGroupScreen> {
-  final _nameCtrl = TextEditingController();
-  final _searchCtrl = TextEditingController();
+  static const _maxNameLength = 60;
+  static const _maxMembers = 50;
+
+  final _name = TextEditingController();
+  final _search = TextEditingController();
   final _client = Supabase.instance.client;
 
-  List<Map<String, dynamic>> _searchResults = [];
-  final List<Map<String, dynamic>> _selected = [];
+  final List<_Person> _selected = [];
+  List<_Person> _results = [];
   bool _searching = false;
   bool _creating = false;
   String? _error;
+  Timer? _debounce;
+  int _searchId = 0;
 
   @override
   void dispose() {
-    _nameCtrl.dispose();
-    _searchCtrl.dispose();
+    _debounce?.cancel();
+    _name.dispose();
+    _search.dispose();
     super.dispose();
   }
 
-  Future<void> _search(String query) async {
-    if (query.trim().isEmpty) {
-      setState(() => _searchResults = []);
+  void _onSearchChanged(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () => _runSearch(value));
+  }
+
+  Future<void> _runSearch(String value) async {
+    final q = value.trim();
+    final me = context.read<AuthProvider>().userId;
+    if (q.length < 2 || me == null) {
+      setState(() {
+        _results = [];
+        _searching = false;
+      });
       return;
     }
+
+    final id = ++_searchId;
     setState(() => _searching = true);
     try {
-      final currentUserId =
-          context.read<AuthProvider>().currentUser?.id ?? '';
-      final data = await _client
-          .from('profiles')
+      final rows = await _client
+          .from(Tables.publicProfiles)
           .select('id, user_name, avatar_url')
-          .ilike('user_name', '%${query.trim()}%')
-          .neq('id', currentUserId)
+          .ilike('user_name', '%${escapeLike(q)}%')
+          .neq('id', me)
           .limit(20);
-
+      if (!mounted || id != _searchId) return;
       setState(() {
-        _searchResults = (data as List)
-            .map((e) => Map<String, dynamic>.from(e as Map))
-            .where((p) =>
-                !_selected.any((s) => s['userId'] == p['id']))
+        _results = rows
+            .map(_Person.fromRow)
+            .where((p) => !_selected.any((s) => s.id == p.id))
             .toList();
       });
-    } catch (_) {
+    } catch (e) {
+      friendlyError(e);
     } finally {
-      setState(() => _searching = false);
+      if (mounted && id == _searchId) setState(() => _searching = false);
     }
   }
 
-  void _toggleMember(Map<String, dynamic> profile) {
+  void _add(_Person p) {
+    if (_selected.length >= _maxMembers) return;
     setState(() {
-      final uid = profile['id'] as String;
-      final already = _selected.indexWhere((s) => s['userId'] == uid);
-      if (already != -1) {
-        _selected.removeAt(already);
-      } else {
-        _selected.add({
-          'userId': uid,
-          'userName': profile['user_name'],
-          'avatarUrl': profile['avatar_url'],
-        });
-      }
-      _searchResults.removeWhere((r) => r['id'] == uid);
+      _selected.add(p);
+      _results.removeWhere((r) => r.id == p.id);
     });
   }
 
-  Future<void> _createGroup() async {
-    final name = _nameCtrl.text.trim();
-    if (name.isEmpty) {
-      setState(() => _error = 'Bitte einen Gruppennamen eingeben');
-      return;
-    }
-    if (_selected.isEmpty) {
-      setState(() => _error = 'Bitte mindestens ein Mitglied hinzufügen');
+  Future<void> _create() async {
+    final name = _name.text.trim();
+    final problem = name.isEmpty
+        ? 'Bitte gib der Gruppe einen Namen.'
+        : _selected.isEmpty
+            ? 'Füg mindestens ein Mitglied hinzu.'
+            : null;
+    if (problem != null) {
+      setState(() => _error = problem);
       return;
     }
 
@@ -94,27 +120,19 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       _error = null;
     });
 
-    final auth = context.read<AuthProvider>();
-    final profile = context.read<ProfileProvider>().profile;
-
-    final (convId, err) = await context.read<ChatProvider>().createGroupChat(
-          name: name,
-          currentUserId: auth.currentUser!.id,
-          currentUserName: profile?.userName ?? 'Anonym',
-          currentUserAvatar: profile?.avatarUrl,
-          members: _selected,
-        );
-
+    final chat = context.read<ChatProvider>();
+    final result = await chat.createGroup(name, [for (final p in _selected) p.id]);
     if (!mounted) return;
-    setState(() => _creating = false);
 
-    if (err != null) {
-      setState(() => _error = err);
+    final conv = result.conversationId == null ? null : chat.byId(result.conversationId!);
+    if (conv == null) {
+      setState(() {
+        _creating = false;
+        _error = result.error ?? 'Gruppe konnte nicht geöffnet werden.';
+      });
       return;
     }
 
-    final conversations = context.read<ChatProvider>().conversations;
-    final conv = conversations.firstWhere((c) => c.id == convId!);
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => ChatScreen(conversation: conv)),
     );
@@ -123,26 +141,20 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: kBgDark,
       appBar: AppBar(
-        title: const Text('Gruppe erstellen'),
+        title: const Text('Neue Gruppe'),
         actions: [
           TextButton(
-            onPressed: _creating ? null : _createGroup,
+            onPressed: _creating ? null : _create,
             child: _creating
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                        color: kNeonOrange, strokeWidth: 2),
-                  )
-                : const Text('Erstellen',
-                    style: TextStyle(
-                        color: kNeonOrange, fontWeight: FontWeight.w700)),
+                ? const ButtonSpinner(color: kPrimary)
+                : const Text('Erstellen'),
           ),
+          const SizedBox(width: 8),
         ],
       ),
       body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
             padding: const EdgeInsets.all(16),
@@ -150,116 +162,93 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 TextField(
-                  controller: _nameCtrl,
+                  controller: _name,
+                  maxLength: _maxNameLength,
                   decoration: const InputDecoration(
+                    counterText: '',
                     labelText: 'Gruppenname',
-                    prefixIcon:
-                        Icon(Icons.group, color: kTextMuted, size: 20),
+                    prefixIcon: Icon(Icons.group_outlined, color: kTextMuted, size: 20),
                   ),
-                  style: const TextStyle(color: kTextPrimary),
                 ),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(_error!,
-                        style:
-                            const TextStyle(color: kError, fontSize: 12)),
-                  ),
-                const SizedBox(height: 16),
+                if (_error != null) ...[
+                  const SizedBox(height: 10),
+                  ErrorBanner(_error!),
+                ],
                 if (_selected.isNotEmpty) ...[
-                  const Text('Ausgewählt:',
-                      style: TextStyle(
-                          color: kTextSecondary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Mitglieder (${_selected.length})',
+                    style: const TextStyle(
+                      color: kTextSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
                     runSpacing: 4,
-                    children: _selected
-                        .map((m) => Chip(
-                              label: Text(
-                                m['userName'] as String? ?? 'Anonym',
-                                style:
-                                    const TextStyle(color: kTextPrimary),
-                              ),
-                              deleteIcon: const Icon(Icons.close,
-                                  size: 16, color: kTextMuted),
-                              onDeleted: () {
-                                setState(() => _selected.remove(m));
-                              },
-                            ))
-                        .toList(),
+                    children: [
+                      for (final p in _selected)
+                        InputChip(
+                          avatar: UserAvatar(url: p.avatarUrl, name: p.name, radius: 12),
+                          label: Text(p.name),
+                          onDeleted: () => setState(() => _selected.remove(p)),
+                        ),
+                    ],
                   ),
-                  const SizedBox(height: 12),
                 ],
+                const SizedBox(height: 16),
                 TextField(
-                  controller: _searchCtrl,
-                  onChanged: _search,
+                  controller: _search,
+                  onChanged: _onSearchChanged,
+                  maxLength: 50,
                   decoration: InputDecoration(
-                    hintText: 'Mitglieder suchen...',
-                    prefixIcon: const Icon(Icons.search,
-                        color: kTextMuted, size: 20),
+                    counterText: '',
+                    hintText: 'Personen suchen (min. 2 Zeichen)',
+                    prefixIcon: const Icon(Icons.search, color: kTextMuted, size: 20),
                     suffixIcon: _searching
                         ? const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: kNeonOrange),
-                            ),
+                            padding: EdgeInsets.all(14),
+                            child: ButtonSpinner(color: kPrimary, size: 16),
                           )
                         : null,
                   ),
-                  style: const TextStyle(color: kTextPrimary),
                 ),
               ],
             ),
           ),
-          Expanded(
-            child: _searchResults.isEmpty && _searchCtrl.text.isNotEmpty
-                ? const Center(
-                    child: Text('Keine Nutzer gefunden',
-                        style: TextStyle(color: kTextSecondary)),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _searchResults.length,
-                    itemBuilder: (_, i) {
-                      final p = _searchResults[i];
-                      final avatar = p['avatar_url'] as String?;
-                      final name =
-                          p['user_name'] as String? ?? 'Anonym';
-                      return ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: CircleAvatar(
-                          backgroundColor: kBgCardElevated,
-                          backgroundImage:
-                              avatar != null ? NetworkImage(avatar) : null,
-                          child: avatar == null
-                              ? Text(
-                                  name.substring(0, 1).toUpperCase(),
-                                  style: const TextStyle(
-                                      color: kNeonOrange,
-                                      fontWeight: FontWeight.w700))
-                              : null,
-                        ),
-                        title: Text(name,
-                            style:
-                                const TextStyle(color: kTextPrimary)),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.add_circle_outline,
-                              color: kNeonOrange),
-                          onPressed: () => _toggleMember(p),
-                        ),
-                        onTap: () => _toggleMember(p),
-                      );
-                    },
-                  ),
-          ),
+          Expanded(child: _resultList()),
         ],
       ),
+    );
+  }
+
+  Widget _resultList() {
+    if (_results.isEmpty) {
+      final searched = _search.text.trim().length >= 2 && !_searching;
+      return searched
+          ? const Center(
+              child: Text(
+                'Niemanden gefunden',
+                style: TextStyle(color: kTextSecondary),
+              ),
+            )
+          : const SizedBox.shrink();
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      itemCount: _results.length,
+      itemBuilder: (_, i) {
+        final p = _results[i];
+        return ListTile(
+          leading: UserAvatar(url: p.avatarUrl, name: p.name),
+          title: Text(p.name),
+          trailing: const Icon(Icons.add_circle_outline, color: kPrimary),
+          onTap: () => _add(p),
+        );
+      },
     );
   }
 }

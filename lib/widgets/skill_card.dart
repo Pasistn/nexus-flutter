@@ -1,49 +1,58 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../core/theme/app_theme.dart';
 import '../models/skill.dart';
 import '../providers/ratings_provider.dart';
-import 'star_rating_bar.dart';
+import 'skill_type_style.dart';
+import 'star_rating.dart';
+import 'user_avatar.dart';
 
-class SkillCardWidget extends StatefulWidget {
+class SkillCard extends StatefulWidget {
+  const SkillCard({super.key, required this.skill, this.footer});
+
   final Skill skill;
-
-  const SkillCardWidget({super.key, required this.skill});
+  final Widget? footer;
 
   @override
-  State<SkillCardWidget> createState() => _SkillCardWidgetState();
+  State<SkillCard> createState() => _SkillCardState();
 }
 
-class _SkillCardWidgetState extends State<SkillCardWidget> {
+class _SkillCardState extends State<SkillCard> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (widget.skill.userId.isNotEmpty) {
-        context.read<RatingsProvider>().loadForUser(widget.skill.userId);
-      }
-    });
+    context.read<RatingsProvider>().ensureLoaded(widget.skill.userId);
+  }
+
+  @override
+  void didUpdateWidget(SkillCard old) {
+    super.didUpdateWidget(old);
+    if (old.skill.userId != widget.skill.userId) {
+      context.read<RatingsProvider>().ensureLoaded(widget.skill.userId);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final summary = context
-        .watch<RatingsProvider>()
-        .getSummary(widget.skill.userId);
-
-    final isSearching = widget.skill.skillType == 'searching';
-    final accentColor = isSearching ? kError : kNeonOrange;
+    final skill = widget.skill;
+    final accent = skill.type.color;
+    final summary = context.select<RatingsProvider, ({double avg, int n})?>(
+      (p) {
+        final s = p.summaryFor(skill.userId);
+        return s == null ? null : (avg: s.average, n: s.count);
+      },
+    );
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: kBgCard,
+        color: kSurface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isSearching ? kError.withOpacity(0.5) : kBorderColor,
-          width: isSearching ? 1.5 : 1,
+          color: skill.isSearch ? kError.withValues(alpha: 0.45) : kBorder,
+          width: skill.isSearch ? 1.5 : 1,
         ),
       ),
       child: Column(
@@ -51,134 +60,106 @@ class _SkillCardWidgetState extends State<SkillCardWidget> {
         children: [
           Row(
             children: [
-              _buildAvatar(accentColor),
+              UserAvatar(url: skill.avatarUrl, name: skill.userName, color: accent),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(widget.skill.skillTitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: kTextPrimary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 15)),
-                    Text(widget.skill.userName ?? '',
-                        style: const TextStyle(
-                            color: kTextSecondary, fontSize: 12)),
-                    const SizedBox(height: 2),
+                    Text(
+                      skill.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: kTextPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                      ),
+                    ),
+                    Text(
+                      skill.userName ?? 'Unbekannt',
+                      style: const TextStyle(color: kTextSecondary, fontSize: 12),
+                    ),
                     if (summary != null)
-                      StarRatingBar(
-                        rating: summary.avg,
-                        count: summary.count,
-                        size: 13,
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: RatingSummaryLine(
+                          average: summary.avg,
+                          count: summary.n,
+                        ),
                       ),
                   ],
                 ),
               ),
-              _buildTypeBadge(isSearching),
+              _Tag(label: skill.type.badge, color: accent, filled: true),
             ],
           ),
           const SizedBox(height: 10),
-          Text(widget.skill.description,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  color: kTextSecondary, fontSize: 13, height: 1.4)),
-          if (widget.skill.categoryName != null) ...[
+          Text(
+            skill.description,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: kTextSecondary,
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          if (skill.categoryName != null || skill.tags.isNotEmpty) ...[
             const SizedBox(height: 10),
-            _buildCategoryBadge(widget.skill.categoryName!, widget.skill.categoryIcon, accentColor),
-          ],
-          if (widget.skill.tags.isNotEmpty) ...[
-            const SizedBox(height: 8),
             Wrap(
               spacing: 6,
               runSpacing: 6,
-              children: widget.skill.tags.take(4).map(_buildTag).toList(),
+              children: [
+                if (skill.categoryName != null)
+                  _Tag(
+                    label: [skill.categoryIcon, skill.categoryName]
+                        .whereType<String>()
+                        .join(' '),
+                    color: accent,
+                  ),
+                for (final tag in skill.tags.take(4))
+                  _Tag(label: tag, color: kTextMuted),
+              ],
             ),
+          ],
+          if (widget.footer != null) ...[
+            const SizedBox(height: 12),
+            widget.footer!,
           ],
         ],
       ),
     );
   }
+}
 
-  Widget _buildAvatar(Color accentColor) {
-    return CircleAvatar(
-      radius: 20,
-      backgroundColor: kBgCardElevated,
-      backgroundImage: widget.skill.avatarUrl != null
-          ? CachedNetworkImageProvider(widget.skill.avatarUrl!)
-          : null,
-      child: widget.skill.avatarUrl == null
-          ? Text(
-              widget.skill.userName?.substring(0, 1).toUpperCase() ?? '?',
-              style: TextStyle(
-                  color: accentColor, fontWeight: FontWeight.w700))
-          : null,
-    );
-  }
+class _Tag extends StatelessWidget {
+  const _Tag({required this.label, required this.color, this.filled = false});
 
-  Widget _buildTypeBadge(bool isSearching) {
+  final String label;
+  final Color color;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    final neutral = color == kTextMuted;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: isSearching
-            ? kError.withOpacity(0.10)
-            : kNeonOrange.withOpacity(0.10),
+        color: neutral ? kSurfaceAlt : color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
-          color: isSearching
-              ? kError.withOpacity(0.4)
-              : kNeonOrange.withOpacity(0.4),
+          color: neutral ? kBorder : color.withValues(alpha: 0.35),
         ),
       ),
       child: Text(
-        isSearching ? 'Suche' : 'Angebot',
+        label,
         style: TextStyle(
-          color: isSearching ? kError : kNeonOrange,
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
+          color: color,
+          fontSize: filled ? 10 : 11,
+          fontWeight: filled ? FontWeight.w700 : FontWeight.w500,
         ),
       ),
-    );
-  }
-
-  Widget _buildCategoryBadge(String name, String? icon, Color accentColor) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-      decoration: BoxDecoration(
-        color: accentColor.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: accentColor.withOpacity(0.35)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Text(icon, style: const TextStyle(fontSize: 12)),
-            const SizedBox(width: 5),
-          ],
-          Text(name,
-              style: TextStyle(
-                  color: accentColor,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTag(String tag) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: kBgCardElevated,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: kBorderColor),
-      ),
-      child: Text(tag,
-          style: const TextStyle(color: kTextMuted, fontSize: 11)),
     );
   }
 }

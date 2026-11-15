@@ -1,60 +1,71 @@
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class GeocodingResult {
+  const GeocodingResult({
+    required this.lat,
+    required this.lng,
+    required this.displayName,
+  });
+
   final double lat;
   final double lng;
   final String displayName;
-
-  const GeocodingResult(
-      {required this.lat, required this.lng, required this.displayName});
 }
 
 class GeocodingService {
-  static const _nominatimBase = 'https://nominatim.openstreetmap.org';
+  GeocodingService._();
+
+  static const _host = 'nominatim.openstreetmap.org';
+  static const _timeout = Duration(seconds: 10);
+
+  static Map<String, String> get _headers => {
+        'Accept-Language': 'de',
+        if (!kIsWeb) 'User-Agent': 'NexusSkillExchange/1.0',
+      };
 
   static Future<GeocodingResult?> geocode(String address) async {
-    final uri = Uri.parse('$_nominatimBase/search').replace(
-      queryParameters: {
-        'q': address,
-        'format': 'json',
-        'limit': '1',
-      },
-    );
+    final query = address.trim();
+    if (query.isEmpty || query.length > 200) return null;
 
-    try {
-      final res = await http.get(uri, headers: {
-        'User-Agent': 'NexusApp/1.0 (nexus@skill-exchange.app)',
-      });
-      if (res.statusCode != 200) return null;
-      final data = jsonDecode(res.body) as List;
-      if (data.isEmpty) return null;
-      final first = data.first as Map<String, dynamic>;
-      return GeocodingResult(
-        lat: double.parse(first['lat'] as String),
-        lng: double.parse(first['lon'] as String),
-        displayName: first['display_name'] as String,
-      );
-    } catch (_) {
+    final json = await _get('/search', {
+      'q': query,
+      'format': 'json',
+      'limit': '1',
+    });
+    if (json is! List || json.isEmpty) return null;
+
+    final hit = json.first as Map<String, dynamic>;
+    final lat = double.tryParse(hit['lat'] as String? ?? '');
+    final lng = double.tryParse(hit['lon'] as String? ?? '');
+    if (lat == null || lng == null || lat.abs() > 90 || lng.abs() > 180) {
       return null;
     }
+    return GeocodingResult(
+      lat: lat,
+      lng: lng,
+      displayName: hit['display_name'] as String? ?? query,
+    );
   }
 
   static Future<String?> reverseGeocode(double lat, double lng) async {
-    final uri =
-        Uri.parse('$_nominatimBase/reverse').replace(queryParameters: {
-      'lat': lat.toString(),
-      'lon': lng.toString(),
+    final json = await _get('/reverse', {
+      'lat': '$lat',
+      'lon': '$lng',
       'format': 'json',
     });
+    return json is Map<String, dynamic> ? json['display_name'] as String? : null;
+  }
 
+  static Future<Object?> _get(String path, Map<String, String> params) async {
     try {
-      final res = await http.get(uri, headers: {
-        'User-Agent': 'NexusApp/1.0 (nexus@skill-exchange.app)',
-      });
+      final res = await http
+          .get(Uri.https(_host, path, params), headers: _headers)
+          .timeout(_timeout);
       if (res.statusCode != 200) return null;
-      final data = jsonDecode(res.body) as Map<String, dynamic>;
-      return data['display_name'] as String?;
+      return jsonDecode(utf8.decode(res.bodyBytes));
     } catch (_) {
       return null;
     }
