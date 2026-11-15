@@ -411,7 +411,7 @@ class _Features extends StatelessWidget {
       Icons.radar_rounded,
       Color(0xFFEDE9FE),
       'LOKAL & LIVE',
-      'Der Radar zeigt dir in Echtzeit, wer in deiner Umgebung etwas anbietet oder sucht.',
+      'Das Radar zeigt dir in Echtzeit, wer in deiner Umgebung etwas anbietet oder sucht.',
     ),
     (
       Icons.verified_user_outlined,
