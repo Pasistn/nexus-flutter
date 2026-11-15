@@ -40,6 +40,28 @@ alter table public.skills add column if not exists tags text[] not null default 
 alter table public.skills add column if not exists status text not null default 'active';
 alter table public.skills add column if not exists created_at timestamptz not null default now();
 alter table public.skills drop column if exists points_per_hour;
+alter table public.skills alter column user_name drop not null;
+
+do $$
+begin
+  if (select data_type from information_schema.columns
+      where table_schema = 'public' and table_name = 'skills' and column_name = 'tags') = 'text' then
+    alter table public.skills add column tags_list text[] not null default '{}';
+    update public.skills
+       set tags_list = case
+         when tags ~ '^\s*\[' then array(select jsonb_array_elements_text(tags::jsonb))
+         when tags ~ '^\s*\{' then tags::text[]
+         when nullif(btrim(tags), '') is not null then array[btrim(tags)]
+         else '{}'
+       end;
+    alter table public.skills drop column tags;
+    alter table public.skills rename column tags_list to tags;
+  end if;
+end $$;
+
+delete from public.skills where lat is null or lng is null;
+alter table public.skills alter column lat set not null;
+alter table public.skills alter column lng set not null;
 
 alter table public.profiles add column if not exists user_name text;
 alter table public.profiles add column if not exists bio text;
@@ -135,6 +157,42 @@ create table if not exists public.device_tokens (
   platform   text not null default 'android',
   updated_at timestamptz not null default now()
 );
+
+delete from public.skill_requests r
+where not exists (select 1 from public.skills s where s.id = r.skill_id);
+
+update public.conversations c
+set skill_id = null
+where skill_id is not null
+  and not exists (select 1 from public.skills s where s.id = c.skill_id);
+
+do $$
+declare
+  fk record;
+  v_name text;
+begin
+  for fk in
+    select * from (values
+      ('profiles',             'id',             'auth.users',        'cascade'),
+      ('skills',               'user_id',        'auth.users',        'cascade'),
+      ('skills',               'category_id',    'public.categories', 'set null'),
+      ('conversations',        'created_by',     'auth.users',        'cascade'),
+      ('conversations',        'skill_id',       'public.skills',     'set null'),
+      ('conversation_members', 'user_id',        'auth.users',        'cascade'),
+      ('messages',             'sender_id',      'auth.users',        'cascade'),
+      ('skill_requests',       'skill_id',       'public.skills',     'cascade'),
+      ('skill_requests',       'requester_id',   'auth.users',        'cascade'),
+      ('skill_requests',       'skill_owner_id', 'auth.users',        'cascade')
+    ) as v (tbl, col, ref, action)
+  loop
+    v_name := fk.tbl || '_' || fk.col || '_fkey';
+    execute format('alter table public.%I drop constraint if exists %I', fk.tbl, v_name);
+    execute format(
+      'alter table public.%I add constraint %I foreign key (%I) references %s (id) on delete %s',
+      fk.tbl, v_name, fk.col, fk.ref, fk.action
+    );
+  end loop;
+end $$;
 
 with ranked as (
   select id, first_value(id) over (partition by name order by ctid) as keep_id
