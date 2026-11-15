@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="Nexus – tausche Skills statt Geld. Live-Radar für Nachbarschaftshilfe mit Chat, Anfragen und Bewertungen.">
+  <meta name="theme-color" content="#2563EB">
+
+  <meta property="og:title" content="Nexus – Skills tauschen">
+  <meta property="og:description" content="Finde Menschen in deiner Nähe, lerne Neues und biete an, was du kannst.">
+  <meta property="og:image" content="icons/Icon-512.png">
+
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Nexus">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="manifest" href="manifest.json">
+
+  <title>Nexus – Skills tauschen</title>
+
+  <style>
+    html, body { margin: 0; height: 100%; background: #F1F5F9; }
+    #splash {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: #2563EB; transition: opacity .3s ease;
+    }
+    #splash img { width: 72px; height: 72px; border-radius: 18px; }
+    #splash span { margin-top: 14px; font-weight: 800; letter-spacing: 3px; font-size: 14px; }
+    #splash i {
+      margin-top: 18px; width: 28px; height: 28px; border-radius: 50%;
+      border: 3px solid #DBEAFE; border-top-color: #2563EB;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="splash">
+    <img src="icons/Icon-192.png" alt="">
+    <span>NEXUS</span>
+    <i></i>
+  </div>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var el = document.getElementById('splash');
+      if (!el) return;
+      el.style.opacity = '0';
+      setTimeout(function () { el.remove(); }, 300);
+    });
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

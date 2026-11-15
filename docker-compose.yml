@@ -1,0 +1,12 @@
+services:
+  web:
+    build:
+      context: .
+      args:
+        SUPABASE_URL: ${SUPABASE_URL:?set SUPABASE_URL in .env}
+        SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?set SUPABASE_ANON_KEY in .env}
+    image: nexus-web:latest
+    container_name: nexus-web
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:80"
