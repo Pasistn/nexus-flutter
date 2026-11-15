@@ -130,7 +130,7 @@ class SkillsProvider extends ChangeNotifier {
   Future<Map<String, String?>> _avatarsFor(Set<String> userIds) async {
     if (userIds.isEmpty) return const {};
     final rows = await _client
-        .from(Tables.publicProfiles)
+        .from(Tables.profiles)
         .select('id, avatar_url')
         .inFilter('id', userIds.toList());
     return {

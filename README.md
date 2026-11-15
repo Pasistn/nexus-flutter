@@ -48,7 +48,7 @@ supabase/
 - Row Level Security auf allen Tabellen; Chats sind nur für Mitglieder sichtbar.
 - Felder wie Absendername, Anfrage-Empfänger oder Bewerter werden per Trigger aus der Session gesetzt und lassen sich nicht fälschen.
 - Chats und Gruppen entstehen ausschließlich über `SECURITY DEFINER`-Funktionen (`create_direct_chat`, `create_group_chat`, `accept_skill_request`).
-- Heimatadressen liegen in `profiles` (nur für den Besitzer lesbar); alle anderen sehen die View `public_profiles`.
+- Öffentliche Profildaten (Name, Bio, Avatar) liegen in `profiles`, die Heimatadresse getrennt davon in `profile_private`, die nur der Besitzer lesen kann.
 - Skill-Koordinaten werden serverseitig auf ~100 m gerundet.
 - Einfache Rate-Limits (Nachrichten, Anfragen, neue Einträge) direkt in den Triggern.
 

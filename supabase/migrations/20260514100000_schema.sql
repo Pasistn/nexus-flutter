@@ -5,10 +5,15 @@ create table if not exists public.profiles (
   user_name    text,
   bio          text,
   avatar_url   text,
+  created_at   timestamptz not null default now()
+);
+
+create table if not exists public.profile_private (
+  id           uuid primary key references public.profiles (id) on delete cascade,
   home_address text,
   home_lat     double precision,
   home_lng     double precision,
-  created_at   timestamptz not null default now()
+  updated_at   timestamptz not null default now()
 );
 
 create table if not exists public.categories (
@@ -66,10 +71,25 @@ alter table public.skills alter column lng set not null;
 alter table public.profiles add column if not exists user_name text;
 alter table public.profiles add column if not exists bio text;
 alter table public.profiles add column if not exists avatar_url text;
-alter table public.profiles add column if not exists home_address text;
-alter table public.profiles add column if not exists home_lat double precision;
-alter table public.profiles add column if not exists home_lng double precision;
 alter table public.profiles add column if not exists created_at timestamptz not null default now();
+
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'profiles' and column_name = 'home_lat') then
+    insert into public.profile_private (id, home_address, home_lat, home_lng)
+    select id, home_address, home_lat, home_lng
+    from public.profiles
+    where home_address is not null or home_lat is not null or home_lng is not null
+    on conflict (id) do nothing;
+
+    drop view if exists public.public_profiles;
+    alter table public.profiles
+      drop column home_address,
+      drop column home_lat,
+      drop column home_lng;
+  end if;
+end $$;
 
 do $$
 begin

@@ -1,6 +1,6 @@
 abstract final class Tables {
   static const profiles = 'profiles';
-  static const publicProfiles = 'public_profiles';
+  static const profilePrivate = 'profile_private';
   static const skills = 'skills';
   static const categories = 'categories';
   static const ratings = 'ratings';

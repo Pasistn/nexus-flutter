@@ -76,7 +76,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     setState(() => _searching = true);
     try {
       final rows = await _client
-          .from(Tables.publicProfiles)
+          .from(Tables.profiles)
           .select('id, user_name, avatar_url')
           .ilike('user_name', '%${escapeLike(q)}%')
           .neq('id', me)

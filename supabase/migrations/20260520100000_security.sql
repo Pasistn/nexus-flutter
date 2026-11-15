@@ -36,7 +36,7 @@ begin
     from pg_policies
     where schemaname = 'public'
       and tablename in (
-        'profiles', 'skills', 'ratings', 'categories', 'conversations',
+        'profiles', 'profile_private', 'skills', 'ratings', 'categories', 'conversations',
         'conversation_members', 'messages', 'skill_requests', 'skill_reports',
         'device_tokens'
       )
@@ -46,6 +46,7 @@ begin
 end $$;
 
 alter table public.profiles             enable row level security;
+alter table public.profile_private      enable row level security;
 alter table public.skills               enable row level security;
 alter table public.ratings              enable row level security;
 alter table public.categories           enable row level security;
@@ -57,8 +58,8 @@ alter table public.skill_reports        enable row level security;
 alter table public.device_tokens        enable row level security;
 
 
-create policy "profiles_select_own" on public.profiles
-  for select to authenticated using (id = (select auth.uid()));
+create policy "profiles_select_all" on public.profiles
+  for select to anon, authenticated using (true);
 create policy "profiles_insert_own" on public.profiles
   for insert to authenticated with check (id = (select auth.uid()));
 create policy "profiles_update_own" on public.profiles
@@ -67,12 +68,7 @@ create policy "profiles_update_own" on public.profiles
 create policy "profiles_delete_own" on public.profiles
   for delete to authenticated using (id = (select auth.uid()));
 
-create or replace view public.public_profiles
-with (security_invoker = false) as
-  select id, user_name, bio, avatar_url from public.profiles;
-
-revoke all on public.public_profiles from public, anon, authenticated;
-grant select on public.public_profiles to anon, authenticated;
+drop view if exists public.public_profiles;
 
 create or replace function public.trg_profiles_validate()
 returns trigger
@@ -84,22 +80,14 @@ begin
     return new;
   end if;
 
-  new.user_name    := nullif(btrim(new.user_name), '');
-  new.bio          := nullif(btrim(new.bio), '');
-  new.home_address := nullif(btrim(new.home_address), '');
+  new.user_name := nullif(btrim(new.user_name), '');
+  new.bio       := nullif(btrim(new.bio), '');
 
   if char_length(new.user_name) > 50 then
     raise exception 'Der Name darf höchstens 50 Zeichen lang sein.';
   end if;
   if char_length(new.bio) > 500 then
     raise exception 'Die Bio darf höchstens 500 Zeichen lang sein.';
-  end if;
-  if char_length(new.home_address) > 300 then
-    raise exception 'Die Adresse ist zu lang.';
-  end if;
-  if (new.home_lat is not null and new.home_lat not between -90 and 90)
-     or (new.home_lng is not null and new.home_lng not between -180 and 180) then
-    raise exception 'Ungültige Koordinaten.';
   end if;
 
   if new.avatar_url is not null
@@ -116,6 +104,47 @@ drop trigger if exists profiles_validate on public.profiles;
 create trigger profiles_validate
   before insert or update on public.profiles
   for each row execute function public.trg_profiles_validate();
+
+create policy "profile_private_select_own" on public.profile_private
+  for select to authenticated using (id = (select auth.uid()));
+create policy "profile_private_insert_own" on public.profile_private
+  for insert to authenticated with check (id = (select auth.uid()));
+create policy "profile_private_update_own" on public.profile_private
+  for update to authenticated
+  using (id = (select auth.uid())) with check (id = (select auth.uid()));
+create policy "profile_private_delete_own" on public.profile_private
+  for delete to authenticated using (id = (select auth.uid()));
+
+create or replace function public.trg_profile_private_validate()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if not public.is_client_request() then
+    return new;
+  end if;
+
+  new.home_address := nullif(btrim(new.home_address), '');
+  new.updated_at   := now();
+
+  if char_length(new.home_address) > 300 then
+    raise exception 'Die Adresse ist zu lang.';
+  end if;
+  if (new.home_lat is null) <> (new.home_lng is null)
+     or (new.home_lat is not null and new.home_lat not between -90 and 90)
+     or (new.home_lng is not null and new.home_lng not between -180 and 180) then
+    raise exception 'Ungültige Koordinaten.';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists profile_private_validate on public.profile_private;
+create trigger profile_private_validate
+  before insert or update on public.profile_private
+  for each row execute function public.trg_profile_private_validate();
 
 create or replace function public.trg_profiles_sync()
 returns trigger
@@ -704,6 +733,7 @@ begin
   delete from public.messages where sender_id = v_uid;
   delete from public.conversation_members where user_id = v_uid;
   delete from public.skills where user_id = v_uid;
+  delete from public.profile_private where id = v_uid;
   delete from public.profiles where id = v_uid;
   delete from auth.users where id = v_uid;
 end;
@@ -715,6 +745,7 @@ grant execute on function public.delete_user() to authenticated;
 
 revoke all on function public.trg_profiles_validate()           from public, anon, authenticated;
 revoke all on function public.trg_profiles_sync()               from public, anon, authenticated;
+revoke all on function public.trg_profile_private_validate()    from public, anon, authenticated;
 revoke all on function public.trg_skills_validate()             from public, anon, authenticated;
 revoke all on function public.trg_ratings_validate()            from public, anon, authenticated;
 revoke all on function public.trg_messages_validate()           from public, anon, authenticated;

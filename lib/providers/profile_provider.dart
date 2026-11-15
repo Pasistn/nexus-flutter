@@ -34,12 +34,11 @@ class ProfileProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final row = await _client
-          .from(Tables.profiles)
-          .select()
-          .eq('id', userId)
-          .maybeSingle();
-      _profile = row == null ? Profile(id: userId) : Profile.fromJson(row);
+      final rows = await Future.wait([
+        _client.from(Tables.profiles).select().eq('id', userId).maybeSingle(),
+        _client.from(Tables.profilePrivate).select().eq('id', userId).maybeSingle(),
+      ]);
+      _profile = Profile.fromJson({...?rows[0], ...?rows[1], 'id': userId});
     } catch (e) {
       _error = friendlyError(e);
     } finally {
@@ -72,7 +71,8 @@ class ProfileProvider extends ChangeNotifier {
     }
 
     try {
-      await _client.from(Tables.profiles).upsert(next.toJson());
+      await _client.from(Tables.profiles).upsert(next.toPublicJson());
+      await _client.from(Tables.profilePrivate).upsert(next.toPrivateJson());
     } catch (e) {
       return friendlyError(e);
     }

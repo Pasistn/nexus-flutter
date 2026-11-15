@@ -29,11 +29,15 @@ class Profile {
         homeLng: (json['home_lng'] as num?)?.toDouble(),
       );
 
-  Map<String, dynamic> toJson() => {
+  Map<String, dynamic> toPublicJson() => {
         'id': id,
         'user_name': userName,
         'bio': bio,
         'avatar_url': avatarUrl,
+      };
+
+  Map<String, dynamic> toPrivateJson() => {
+        'id': id,
         'home_address': homeAddress,
         'home_lat': homeLat,
         'home_lng': homeLng,
